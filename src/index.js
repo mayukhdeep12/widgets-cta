@@ -1,14 +1,111 @@
-import '@kitware/vtk.js/favicon';
+import '@kitware/vtk.js/Rendering/Profiles/Geometry';
 
-// Load the rendering pieces we want to use (for both WebGL and WebGPU)
-import '@kitware/vtk.js/Rendering/Profiles/Volume';
-
-import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
-import vtkSLICSource from '@kitware/vtk.js/Filters/Sources/SLICSource';
-import vtkPiecewiseFunction from '@kitware/vtk.js/Common/DataModel/PiecewiseFunction';
-import vtkVolume from '@kitware/vtk.js/Rendering/Core/Volume';
-import vtkVolumeMapper from '@kitware/vtk.js/Rendering/Core/VolumeMapper';
+import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
+import vtkSphereSource from '@kitware/vtk.js/Filters/Sources/SphereSource';
+import vtkCursor3D from '@kitware/vtk.js/Filters/Sources/Cursor3D';
+import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
+
+const controlPanel = `
+<table>
+  <tr>
+    <td>Focal X</td>
+    <td>
+      <input type="range" name="" id="focalPointX" min="-10" max="10" step="1" value="0">
+    </td>
+  </tr>
+  <tr>
+    <td>Focal Y</td>
+    <td>
+      <input type="range" name="" id="focalPointY" min="-10" max="10" step="1" value="0">
+    </td>
+  </tr>
+  <tr>
+    <td>Focal Z</td>
+    <td>
+      <input type="range" name="" id="focalPointZ" min="-10" max="10" step="1" value="0">
+    </td>
+  </tr>
+  <tr>
+    <td>Model Bounds X Min</td>
+    <td>
+      <input type="range" name="" id="modelBoundsXMin" min="-10" max="10" step="1" value="-10">
+    </td>
+  </tr>
+  <tr>
+    <td>Model Bounds X Max</td>
+    <td>
+      <input type="range" name="" id="modelBoundsXMax" min="-10" max="10" step="1" value="10">
+    </td>
+  </tr>
+  <tr>
+    <td>Model Bounds Y Min</td>
+    <td>
+      <input type="range" name="" id="modelBoundsYMin" min="-10" max="10" step="1" value="-10">
+    </td>
+  </tr>
+  <tr>
+    <td>Model Bounds Y Max</td>
+    <td>
+      <input type="range" name="" id="modelBoundsYMax" min="-10" max="10" step="1" value="10">
+    </td>
+  </tr>
+  <tr>
+    <td>Model Bounds Z Min</td>
+    <td>
+      <input type="range" name="" id="modelBoundsZMin" min="-10" max="10" step="1" value="-10">
+    </td>
+  </tr>
+  <tr>
+    <td>Model Bounds Z Max</td>
+    <td>
+      <input type="range" name="" id="modelBoundsZMax" min="-10" max="10" step="1" value="10">
+    </td>
+  </tr>
+  <tr>
+    <td>Outline</td>
+    <td>
+      <input type="checkbox" name="" id="outline" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>Axes</td>
+    <td>
+      <input type="checkbox" name="" id="axes" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>X Shadows</td>
+    <td>
+      <input type="checkbox" name="" id="xShadows" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>Y Shadows</td>
+    <td>
+      <input type="checkbox" name="" id="yShadows" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>Z Shadows</td>
+    <td>
+      <input type="checkbox" name="" id="zShadows" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>Wrap</td>
+    <td>
+      <input type="checkbox" name="" id="wrap">
+    </td>
+  </tr>
+  <tr>
+    <td>TranslationMode</td>
+    <td>
+      <input type="checkbox" name="" id="translationMode">
+    </td>
+  </tr>
+</table>
+`
 
 // ----------------------------------------------------------------------------
 // Standard rendering code setup
@@ -23,74 +120,82 @@ const renderWindow = fullScreenRenderer.getRenderWindow();
 // ----------------------------------------------------------------------------
 // Example code
 // ----------------------------------------------------------------------------
-// Server is not sending the .gz and with the compress header
-// Need to fetch the true file name and uncompress it locally
-// ----------------------------------------------------------------------------
+const cursor3D = vtkCursor3D.newInstance();
+cursor3D.setFocalPoint([0, 0, 0]);
+cursor3D.setModelBounds([-10, 10, -10, 10, -10, 10]);
+const cursor3DMapper = vtkMapper.newInstance();
+cursor3DMapper.setInputConnection(cursor3D.getOutputPort());
+const cursor3DActor = vtkActor.newInstance();
+cursor3DActor.setMapper(cursor3DMapper);
 
-const NB_CLUSTERS = 20;
-const GRID_SIZE = [256, 256, 10];
+const sphereSource = vtkSphereSource.newInstance();
+const sphererMapper = vtkMapper.newInstance();
+sphererMapper.setInputConnection(sphereSource.getOutputPort());
+const sphereActor = vtkActor.newInstance();
+sphereActor.setMapper(sphererMapper);
 
-const source = vtkSLICSource.newInstance({ dimensions: GRID_SIZE });
-
-for (let i = 0; i < NB_CLUSTERS; i++) {
-  const x = Math.random() * GRID_SIZE[0];
-  const y = Math.random() * GRID_SIZE[1];
-  const z = Math.random() * GRID_SIZE[2];
-  const fnConst = Math.random() * NB_CLUSTERS;
-  const sx = Math.random() * 2 - 1;
-  const sy = Math.random() * 2 - 1;
-  const sz = Math.random() * 2 - 1;
-  source.addCluster(x, y, z, fnConst, sx, sy, sz);
-}
-
-const colorBy = source.getScalarArrayName(); // cluster field
-const dataRange = [-NB_CLUSTERS, NB_CLUSTERS];
-
-const imageData = source.getOutputData();
-imageData.getPointData().setScalars(imageData.getPointData().getArray(colorBy));
-
-console.log(imageData);
-
-const actor = vtkVolume.newInstance();
-const mapper = vtkVolumeMapper.newInstance();
-mapper.setSampleDistance(0.7);
-actor.setMapper(mapper);
-
-// create color and opacity transfer functions
-const ctfun = vtkColorTransferFunction.newInstance();
-ctfun.addRGBPoint(dataRange[0], 1, 0, 0);
-ctfun.addRGBPoint((dataRange[0] + dataRange[1]) * 0.5, 0, 0, 0.2);
-ctfun.addRGBPoint(dataRange[1], 0, 1.0, 1);
-
-const ofun = vtkPiecewiseFunction.newInstance();
-ofun.addPoint(dataRange[0], 0);
-ofun.addPoint((dataRange[0] + dataRange[1]) * 0.5, 1);
-ofun.addPoint(dataRange[1], 0);
-
-actor.getProperty().setRGBTransferFunction(0, ctfun);
-// actor.getProperty().setScalarOpacity(0, ofun);
-
-actor.getProperty().setScalarOpacityUnitDistance(0, 4.5);
-actor.getProperty().setInterpolationTypeToLinear();
-actor.getProperty().setAmbient(0.2);
-actor.getProperty().setDiffuse(0.7);
-actor.getProperty().setSpecular(0.3);
-actor.getProperty().setSpecularPower(8.0);
-
-mapper.setInputData(imageData);
-
-renderer.addVolume(actor);
+renderer.addActor(cursor3DActor);
+renderer.addActor(sphereActor);
 renderer.resetCamera();
 renderWindow.render();
 
 // -----------------------------------------------------------
-// Make some variables global so that you can inspect and
-// modify objects in your browser's developer console:
+// UI control handling
 // -----------------------------------------------------------
 
-global.source = source;
-global.mapper = mapper;
-global.actor = actor;
-global.ctfun = ctfun;
-global.renderer = renderer;
-global.renderWindow = renderWindow;
+fullScreenRenderer.addController(controlPanel);
+const focalPointRanges = ['focalPointX', 'focalPointY', 'focalPointZ'].map(
+  (id) => document.getElementById(id)
+);
+const handleFocalPointInput = (e) => {
+  cursor3D.setFocalPoint([
+    focalPointRanges[0].value,
+    focalPointRanges[1].value,
+    focalPointRanges[2].value,
+  ]);
+  renderer.resetCameraClippingRange();
+  renderWindow.render();
+};
+focalPointRanges.forEach((input) =>
+  input.addEventListener('input', handleFocalPointInput)
+);
+const modelBoundsRanges = [
+  'modelBoundsXMin',
+  'modelBoundsXMax',
+  'modelBoundsYMin',
+  'modelBoundsYMax',
+  'modelBoundsZMin',
+  'modelBoundsZMax',
+].map((id) => document.getElementById(id));
+const handleModelBoundsInput = (e) => {
+  cursor3D.setModelBounds([
+    modelBoundsRanges[0].value,
+    modelBoundsRanges[1].value,
+    modelBoundsRanges[2].value,
+    modelBoundsRanges[3].value,
+    modelBoundsRanges[4].value,
+    modelBoundsRanges[5].value,
+  ]);
+  renderer.resetCameraClippingRange();
+  renderWindow.render();
+};
+modelBoundsRanges.forEach((input) =>
+  input.addEventListener('input', handleModelBoundsInput)
+);
+const checkBoxes = [
+  'outline',
+  'axes',
+  'xShadows',
+  'yShadows',
+  'zShadows',
+  'wrap',
+  'translationMode',
+].map((id) => document.getElementById(id));
+const handleCheckBoxInput = (e) => {
+  cursor3D.set({ [e.target.id]: e.target.checked });
+  renderer.resetCameraClippingRange();
+  renderWindow.render();
+};
+checkBoxes.forEach((checkBox) =>
+  checkBox.addEventListener('input', handleCheckBoxInput)
+);
