@@ -2,7 +2,7 @@
   "name": "npmvtk",
   "version": "1.0.0",
   "description": "",
-  "main": "index.",
+  "main": "index.js",
   "scripts": {
     "build": "webpack --progress --mode=development",
     "start": "webpack serve --progress --mode=development --static=dist",
