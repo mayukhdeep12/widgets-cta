@@ -1,48 +1,67 @@
+import { vec3, quat, mat4 } from 'gl-matrix';
+
 // Load the rendering pieces we want to use (for both WebGL and WebGPU)
+import '@kitware/vtk.js/Rendering/Profiles/Geometry';
 import '@kitware/vtk.js/Rendering/Profiles/Volume';
+import '@kitware/vtk.js/Rendering/Profiles/Glyph';
 
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
+import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
 import vtkHttpDataSetReader from '@kitware/vtk.js/IO/Core/HttpDataSetReader';
+import vtkImageCroppingWidget from '@kitware/vtk.js/Widgets/Widgets3D/ImageCroppingWidget';
+import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
+import vtkPiecewiseFunction from '@kitware/vtk.js/Common/DataModel/PiecewiseFunction';
+import vtkVolume from '@kitware/vtk.js/Rendering/Core/Volume';
 import vtkVolumeMapper from '@kitware/vtk.js/Rendering/Core/VolumeMapper';
-import vtkImageMapper from '@kitware/vtk.js/Rendering/Core/ImageMapper';
-import vtkImageSlice from '@kitware/vtk.js/Rendering/Core/ImageSlice';
-import vtkInteractorStyleImage from '@kitware/vtk.js/Interaction/Style/InteractorStyleImage';
-import vtkInteractorStyleTrackballCamera from '@kitware/vtk.js/Interaction/Style/InteractorStyleTrackballCamera';
-import vtkImageCroppingRegionsWidget from '@kitware/vtk.js/Interaction/Widgets/ImageCroppingRegionsWidget';
+import vtkPlane from '@kitware/vtk.js/Common/DataModel/Plane';
 
 // Force the loading of HttpDataAccessHelper to support gzip decompression
 import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
 
 const controlPanel = `
 <table>
-    <tr>
-        <td>Slice I</td>
-        <td>
-            <input class='sliceI' type="range" min="0" max="2.0" step="1" value="1" />
-        </td>
-    </tr>
-    <tr>
-        <td>Slice J</td>
-        <td>
-            <input class='sliceJ' type="range" min="0" max="2.0" step="1" value="1" />
-        </td>
-    </tr>
-    <tr>
-        <td>Slice K</td>
-        <td>
-            <input class='sliceK' type="range" min="0" max="100" step="1" value="1" />
-        </td>
-    </tr>
-    <tr>
-        <td>View axis</td>
-        <td>
-            <select class='viewAxis'>
-              <option name='I'>I</option>
-              <option name='J'>J</option>
-              <option name='K'>K</option>
-            </select>
-        </td>
-    </tr>
+  <tr>
+    <td>pickable</td>
+    <td>
+      <input class='flag' data-name="pickable" type="checkbox" checked />
+    </td>
+  </tr>
+  <tr>
+    <td>visibility</td>
+    <td>
+      <input class='flag' data-name="visibility" type="checkbox" checked />
+    </td>
+  </tr>
+  <tr>
+    <td>contextVisibility</td>
+    <td>
+      <input class='flag' data-name="contextVisibility" type="checkbox" checked />
+    </td>
+  </tr>
+  <tr>
+    <td>handleVisibility</td>
+    <td>
+      <input class='flag' data-name="handleVisibility" type="checkbox" checked />
+    </td>
+  </tr>
+  <tr>
+    <td>faceHandlesEnabled</td>
+    <td>
+      <input class='flag' data-name="faceHandlesEnabled" type="checkbox" checked />
+    </td>
+  </tr>
+  <tr>
+    <td>edgeHandlesEnabled</td>
+    <td>
+      <input class='flag' data-name="edgeHandlesEnabled" type="checkbox" checked />
+    </td>
+  </tr>
+  <tr>
+    <td>cornerHandlesEnabled</td>
+    <td>
+      <input class='flag' data-name="cornerHandlesEnabled" type="checkbox" checked />
+    </td>
+  </tr>
 </table>
 <style>
 table {
@@ -55,144 +74,185 @@ table {
 // Standard rendering code setup
 // ----------------------------------------------------------------------------
 
-const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance();
+const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
+  background: [0, 0, 0],
+});
 const renderer = fullScreenRenderer.getRenderer();
 const renderWindow = fullScreenRenderer.getRenderWindow();
-/* eslint-disable */
-const interactorStyle2D = vtkInteractorStyleImage.newInstance();
-const interactorStyle3D = vtkInteractorStyleTrackballCamera.newInstance();
-// switch to using interactorStyle2D if you want 2D controls
-renderWindow.getInteractor().setInteractorStyle(interactorStyle3D);
-// set the current image number to the first image
-// interactorStyle2D.setCurrentImageNumber(0);
-/* eslint-enable */
-fullScreenRenderer.addController(controlPanel);
-// renderer.getActiveCamera().setParallelProjection(true);
-
-// ----------------------------------------------------------------------------
-// Helper methods for setting up control panel
-// ----------------------------------------------------------------------------
-
-function setupControlPanel(data, imageMapper) {
-  const sliceInputs = [
-    document.querySelector('.sliceI'),
-    document.querySelector('.sliceJ'),
-    document.querySelector('.sliceK'),
-  ];
-  const viewAxisInput = document.querySelector('.viewAxis');
-
-  const extent = data.getExtent();
-  sliceInputs.forEach((el, idx) => {
-    const lowerExtent = extent[idx * 2];
-    const upperExtent = extent[idx * 2 + 1];
-    el.setAttribute('min', lowerExtent);
-    el.setAttribute('max', upperExtent);
-    el.setAttribute('value', (upperExtent - lowerExtent) / 2);
-  });
-
-  viewAxisInput.value = 'IJKXYZ'[imageMapper.getSlicingMode()];
-
-  sliceInputs.forEach((el, idx) => {
-    el.addEventListener('input', (ev) => {
-      const sliceMode = sliceInputs.indexOf(el);
-      if (imageMapper.getSlicingMode() === sliceMode) {
-        imageMapper.setSlice(Number(ev.target.value));
-        renderWindow.render();
-      }
-    });
-  });
-
-  viewAxisInput.addEventListener('input', (ev) => {
-    const sliceMode = 'IJKXYZ'.indexOf(ev.target.value);
-    imageMapper.setSlicingMode(sliceMode);
-    const slice = sliceInputs[sliceMode].value;
-    imageMapper.setSlice(slice);
-
-    const camPosition = renderer
-      .getActiveCamera()
-      .getFocalPoint()
-      .map((v, idx) => (idx === sliceMode ? v + 1 : v));
-    const viewUp = [0, 0, 0];
-    viewUp[(sliceMode + 2) % 3] = 1;
-    renderer.getActiveCamera().set({ position: camPosition, viewUp });
-    renderer.resetCamera();
-
-    renderWindow.render();
-  });
-}
-
-// ----------------------------------------------------------------------------
-// Create widget
-// ----------------------------------------------------------------------------
-const widget = vtkImageCroppingRegionsWidget.newInstance();
-widget.setInteractor(renderWindow.getInteractor());
-
-// Demonstrate cropping planes event update
-widget.onCroppingPlanesChanged((planes) => {
-  console.log('planes changed:', planes);
-});
-
-// called when the volume is loaded
-function setupWidget(volumeMapper, imageMapper) {
-  widget.setVolumeMapper(volumeMapper);
-  widget.setHandleSize(12); // in pixels
-  widget.setEnabled(true);
-
-  // demonstration of setting various types of handles
-  widget.setFaceHandlesEnabled(true);
-  // widget.setEdgeHandlesEnabled(true);
-  widget.setCornerHandlesEnabled(true);
-
-  renderWindow.render();
-}
-
-// ----------------------------------------------------------------------------
-// Set up volume
-// ----------------------------------------------------------------------------
-const volumeMapper = vtkVolumeMapper.newInstance();
-const imageMapper = vtkImageMapper.newInstance();
-const actor = vtkImageSlice.newInstance();
-actor.setMapper(imageMapper);
-renderer.addViewProp(actor);
-
-const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
-reader
-  .setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`, { loadData: true })
-  .then(() => {
-    const data = reader.getOutputData();
-
-    volumeMapper.setInputData(data);
-    imageMapper.setInputData(data);
-
-    // create our cropping widget
-    setupWidget(volumeMapper, imageMapper);
-
-    // After creating our cropping widget, we can now update our image mapper
-    // with default slice orientation/mode and camera view.
-    const sliceMode = vtkImageMapper.SlicingMode.K;
-    const viewUp = [0, 1, 0];
-
-    imageMapper.setSlicingMode(sliceMode);
-    imageMapper.setSlice(0);
-
-    const camPosition = renderer
-      .getActiveCamera()
-      .getFocalPoint()
-      .map((v, idx) => (idx === sliceMode ? v + 1 : v));
-    renderer.getActiveCamera().set({ position: camPosition, viewUp });
-
-    // setup control panel
-    setupControlPanel(data, imageMapper);
-
-    renderer.resetCamera();
-    renderWindow.render();
-  });
-
-// -----------------------------------------------------------
-// Make some variables global so that you can inspect and
-// modify objects in your browser's developer console:
-// -----------------------------------------------------------
+const apiRenderWindow = fullScreenRenderer.getApiSpecificRenderWindow();
 
 global.renderer = renderer;
 global.renderWindow = renderWindow;
-global.widget = widget;
+
+// ----------------------------------------------------------------------------
+// 2D overlay rendering
+// ----------------------------------------------------------------------------
+
+const overlaySize = 15;
+const overlayBorder = 2;
+const overlay = document.createElement('div');
+overlay.style.position = 'absolute';
+overlay.style.width = `${overlaySize}px`;
+overlay.style.height = `${overlaySize}px`;
+overlay.style.border = `solid ${overlayBorder}px red`;
+overlay.style.borderRadius = '50%';
+overlay.style.left = '-100px';
+overlay.style.pointerEvents = 'none';
+document.querySelector('body').appendChild(overlay);
+
+// ----------------------------------------------------------------------------
+// Widget manager
+// ----------------------------------------------------------------------------
+
+const widgetManager = vtkWidgetManager.newInstance();
+widgetManager.setRenderer(renderer);
+
+const widget = vtkImageCroppingWidget.newInstance();
+
+function widgetRegistration(e) {
+  const action = e ? e.currentTarget.dataset.action : 'addWidget';
+  const viewWidget = widgetManager[action](widget);
+  if (viewWidget) {
+    viewWidget.setDisplayCallback((coords) => {
+      overlay.style.left = '-100px';
+      if (coords) {
+        const [w, h] = apiRenderWindow.getSize();
+        overlay.style.left = `${Math.round(
+          (coords[0][0] / w) * window.innerWidth -
+            overlaySize * 0.5 -
+            overlayBorder
+        )}px`;
+        overlay.style.top = `${Math.round(
+          ((h - coords[0][1]) / h) * window.innerHeight -
+            overlaySize * 0.5 -
+            overlayBorder
+        )}px`;
+      }
+    });
+
+    renderer.resetCamera();
+    renderer.resetCameraClippingRange();
+  }
+  widgetManager.enablePicking();
+  renderWindow.render();
+}
+
+// Initial widget register
+widgetRegistration();
+
+// ----------------------------------------------------------------------------
+// Volume rendering
+// ----------------------------------------------------------------------------
+
+const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
+
+const actor = vtkVolume.newInstance();
+const mapper = vtkVolumeMapper.newInstance();
+mapper.setSampleDistance(1.1);
+actor.setMapper(mapper);
+
+// create color and opacity transfer functions
+const ctfun = vtkColorTransferFunction.newInstance();
+ctfun.addRGBPoint(0, 85 / 255.0, 0, 0);
+ctfun.addRGBPoint(95, 1.0, 1.0, 1.0);
+ctfun.addRGBPoint(225, 0.66, 0.66, 0.5);
+ctfun.addRGBPoint(255, 0.3, 1.0, 0.5);
+const ofun = vtkPiecewiseFunction.newInstance();
+ofun.addPoint(0.0, 0.0);
+ofun.addPoint(255.0, 1.0);
+actor.getProperty().setRGBTransferFunction(0, ctfun);
+actor.getProperty().setScalarOpacity(0, ofun);
+actor.getProperty().setScalarOpacityUnitDistance(0, 3.0);
+actor.getProperty().setInterpolationTypeToLinear();
+actor.getProperty().setUseGradientOpacity(0, true);
+actor.getProperty().setGradientOpacityMinimumValue(0, 2);
+actor.getProperty().setGradientOpacityMinimumOpacity(0, 0.0);
+actor.getProperty().setGradientOpacityMaximumValue(0, 20);
+actor.getProperty().setGradientOpacityMaximumOpacity(0, 1.0);
+actor.getProperty().setShade(true);
+actor.getProperty().setAmbient(0.2);
+actor.getProperty().setDiffuse(0.7);
+actor.getProperty().setSpecular(0.3);
+actor.getProperty().setSpecularPower(8.0);
+
+mapper.setInputConnection(reader.getOutputPort());
+
+// -----------------------------------------------------------
+// Get data
+// -----------------------------------------------------------
+
+function getCroppingPlanes(imageData, ijkPlanes) {
+  const rotation = quat.create();
+  mat4.getRotation(rotation, imageData.getIndexToWorld());
+
+  const rotateVec = (vec) => {
+    const out = [0, 0, 0];
+    vec3.transformQuat(out, vec, rotation);
+    return out;
+  };
+
+  const [iMin, iMax, jMin, jMax, kMin, kMax] = ijkPlanes;
+  const origin = imageData.indexToWorld([iMin, jMin, kMin]);
+  // opposite corner from origin
+  const corner = imageData.indexToWorld([iMax, jMax, kMax]);
+  return [
+    // X min/max
+    vtkPlane.newInstance({ normal: rotateVec([1, 0, 0]), origin }),
+    vtkPlane.newInstance({ normal: rotateVec([-1, 0, 0]), origin: corner }),
+    // Y min/max
+    vtkPlane.newInstance({ normal: rotateVec([0, 1, 0]), origin }),
+    vtkPlane.newInstance({ normal: rotateVec([0, -1, 0]), origin: corner }),
+    // X min/max
+    vtkPlane.newInstance({ normal: rotateVec([0, 0, 1]), origin }),
+    vtkPlane.newInstance({ normal: rotateVec([0, 0, -1]), origin: corner }),
+  ];
+}
+
+reader.setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`).then(() => {
+  reader.loadData().then(() => {
+    const image = reader.getOutputData();
+
+    // update crop widget
+    widget.copyImageDataDescription(image);
+    const cropState = widget.getWidgetState().getCroppingPlanes();
+    cropState.onModified(() => {
+      const planes = getCroppingPlanes(image, cropState.getPlanes());
+      mapper.removeAllClippingPlanes();
+      planes.forEach((plane) => {
+        mapper.addClippingPlane(plane);
+      });
+      mapper.modified();
+    });
+
+    // add volume to renderer
+    renderer.addVolume(actor);
+    renderer.resetCamera();
+    renderer.resetCameraClippingRange();
+    renderWindow.render();
+  });
+});
+
+// -----------------------------------------------------------
+// UI control handling
+// -----------------------------------------------------------
+
+fullScreenRenderer.addController(controlPanel);
+
+function updateFlag(e) {
+  const value = !!e.target.checked;
+  const name = e.currentTarget.dataset.name;
+  widget.set({ [name]: value }); // can be called on either viewWidget or parentWidget
+
+  widgetManager.enablePicking();
+  renderWindow.render();
+}
+
+const elems = document.querySelectorAll('.flag');
+for (let i = 0; i < elems.length; i++) {
+  elems[i].addEventListener('change', updateFlag);
+}
+
+const buttons = document.querySelectorAll('button');
+for (let i = 0; i < buttons.length; i++) {
+  buttons[i].addEventListener('click', widgetRegistration);
+}
