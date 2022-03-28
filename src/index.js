@@ -1,64 +1,81 @@
 import '@kitware/vtk.js/Rendering/Profiles/All';
 
-// Force the loading of HttpDataAccessHelper to support gzip decompression
-import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
-
-import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
-import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
-import vtkRectangleWidget from '@kitware/vtk.js/Widgets/Widgets3D/RectangleWidget';
-import vtkEllipseWidget from '@kitware/vtk.js/Widgets/Widgets3D/EllipseWidget';
-import vtkInteractorStyleImage from '@kitware/vtk.js/Interaction/Style/InteractorStyleImage';
+import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
+import vtkAnnotatedCubeActor from '@kitware/vtk.js/Rendering/Core/AnnotatedCubeActor';
+import vtkDataArray from '@kitware/vtk.js/Common/Core/DataArray';
 import vtkHttpDataSetReader from '@kitware/vtk.js/IO/Core/HttpDataSetReader';
+import vtkGenericRenderWindow from '@kitware/vtk.js/Rendering/Misc/GenericRenderWindow';
+import vtkImageData from '@kitware/vtk.js/Common/DataModel/ImageData';
 import vtkImageMapper from '@kitware/vtk.js/Rendering/Core/ImageMapper';
+import vtkImageReslice from '@kitware/vtk.js/Imaging/Core/ImageReslice';
 import vtkImageSlice from '@kitware/vtk.js/Rendering/Core/ImageSlice';
-import vtkSphere from '@kitware/vtk.js/Common/DataModel/Sphere';
+import vtkInteractorStyleImage from '@kitware/vtk.js/Interaction/Style/InteractorStyleImage';
+import vtkInteractorStyleTrackballCamera from '@kitware/vtk.js/Interaction/Style/InteractorStyleTrackballCamera';
+import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
+import vtkOutlineFilter from '@kitware/vtk.js/Filters/General/OutlineFilter';
+import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
+import vtkResliceCursorWidget from '@kitware/vtk.js/Widgets/Widgets3D/ResliceCursorWidget';
+import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
 
-import {
-  BehaviorCategory,
-  ShapeBehavior,
-  TextPosition,
-} from '@kitware/vtk.js/Widgets/Widgets3D/ShapeWidget/Constants';
-
-import { VerticalTextAlignment } from '@kitware/vtk.js/Widgets/SVG/SVGLandmarkRepresentation/Constants';
-
-import { ViewTypes } from '@kitware/vtk.js/Widgets/Core/WidgetManager/Constants';
+import vtkSphereSource from '@kitware/vtk.js/Filters/Sources/SphereSource';
+import { CaptureOn } from '@kitware/vtk.js/Widgets/Core/WidgetManager/Constants';
 
 import { vec3 } from 'gl-matrix';
+import { SlabMode } from '@kitware/vtk.js/Imaging/Core/ImageReslice/Constants';
+
+import { xyzToViewType } from '@kitware/vtk.js/Widgets/Widgets3D/ResliceCursorWidget/Constants';
+
+// Force the loading of HttpDataAccessHelper to support gzip decompression
+import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
 
 const controlPanel = `
 <table>
   <tr>
-    <td>Slice #</td>
+    <td>Keep orthogonality:</td>
     <td>
-      <input class="slice" type="range" min="0" max="0" step="1">
+      <input type="checkbox" id="checkboxOrthogality" checked>
     </td>
   </tr>
   <tr>
-    <td>Slice Axis</td>
+    <td>Allow rotation:</td>
     <td>
-      <select class="axis">
-        <option name="I">I</option>
-        <option name="J">J</option>
-        <option name="K" selected>K</option>
+      <input type="checkbox" id="checkboxRotation" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>Allow translation:</td>
+    <td>
+      <input type="checkbox" id="checkboxTranslation" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>Scale in pixels:</td>
+    <td>
+      <input type="checkbox" id="checkboxScaleInPixels" checked>
+    </td>
+  </tr>
+  <tr>
+    <td>Slab Mode :</td>
+    <td>
+      <select id="slabMode">
+        <option id="slabModeMin">MIN</option>
+        <option id="slabModeMax">MAX</option>
+        <option id="slabModeMean" selected="selected">MEAN</option>
+        <option id="slabModeSum">SUM</option>
       </select>
     </td>
   </tr>
   <tr>
-    <td>
-      <select class="widget">
-        <option name="rectangleWidget">rectangleWidget</option>
-        <option name="ellipseWidget" selected>ellipseWidget</option>
-        <option name="circleWidget">circleWidget</option>
-      </select>
-      </td>
+    <td>Slab Number of Slices :</td>
+    <td><input id='slabNumber' type="range" min="1" max="100" step="1" value="1" style="width: 100px;"/></td>
+    <td id='slabNumberValue'>1</td>
   </tr>
   <tr>
     <td>
-      <button class="reset">reset</button>
+      <button id="buttonReset">Reset views:</button>
     </td>
-  </tr>
-</table>
-<style>
+  </tr>  
+  <style>
 table {
   margin-top: 100px;
 }
@@ -66,329 +83,411 @@ table {
 `
 
 // ----------------------------------------------------------------------------
-// Standard rendering code setup
+// Define main attributes
 // ----------------------------------------------------------------------------
 
-// scene
-const scene = {};
+const viewColors = [
+  [1, 0, 0], // sagittal
+  [0, 1, 0], // coronal
+  [0, 0, 1], // axial
+  [0.5, 0.5, 0.5], // 3D
+];
 
-scene.fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
-  rootContainer: document.body,
-  background: [0.1, 0.1, 0.1],
-});
+const viewAttributes = [];
+const widget = vtkResliceCursorWidget.newInstance();
+const widgetState = widget.getWidgetState();
+widgetState.setKeepOrthogonality(true);
+widgetState.setOpacity(0.6);
+widgetState.setSphereRadius(10);
+widgetState.setLineThickness(5);
 
-scene.renderer = scene.fullScreenRenderer.getRenderer();
-scene.renderWindow = scene.fullScreenRenderer.getRenderWindow();
-scene.openGLRenderWindow =
-  scene.fullScreenRenderer.getApiSpecificRenderWindow();
-scene.camera = scene.renderer.getActiveCamera();
-
-// setup 2D view
-scene.camera.setParallelProjection(true);
-scene.iStyle = vtkInteractorStyleImage.newInstance();
-scene.iStyle.setInteractionMode('IMAGE_SLICING');
-scene.renderWindow.getInteractor().setInteractorStyle(scene.iStyle);
-scene.fullScreenRenderer.addController(controlPanel);
-
-function setCamera(sliceMode, renderer, data) {
-  const ijk = [0, 0, 0];
-  const position = [0, 0, 0];
-  const focalPoint = [0, 0, 0];
-  const viewUp = sliceMode === 1 ? [0, 0, 1] : [0, 1, 0];
-  data.indexToWorld(ijk, focalPoint);
-  ijk[sliceMode] = 1;
-  data.indexToWorld(ijk, position);
-  renderer.getActiveCamera().set({ focalPoint, position, viewUp });
-  renderer.resetCamera();
-}
+const showDebugActors = true;
 
 // ----------------------------------------------------------------------------
-// Widget manager
+// Define html structure
 // ----------------------------------------------------------------------------
 
-scene.widgetManager = vtkWidgetManager.newInstance();
-scene.widgetManager.setRenderer(scene.renderer);
-
-// Widgets
-const widgets = {};
-widgets.rectangleWidget = vtkRectangleWidget.newInstance({
-  resetAfterPointPlacement: true,
-});
-widgets.ellipseWidget = vtkEllipseWidget.newInstance({
-  modifierBehavior: {
-    None: {
-      [BehaviorCategory.PLACEMENT]:
-        ShapeBehavior[BehaviorCategory.PLACEMENT].CLICK_AND_DRAG,
-      [BehaviorCategory.POINTS]:
-        ShapeBehavior[BehaviorCategory.POINTS].CORNER_TO_CORNER,
-      [BehaviorCategory.RATIO]: ShapeBehavior[BehaviorCategory.RATIO].FREE,
-    },
-  },
-});
-widgets.circleWidget = vtkEllipseWidget.newInstance({
-  modifierBehavior: {
-    None: {
-      [BehaviorCategory.PLACEMENT]:
-        ShapeBehavior[BehaviorCategory.PLACEMENT].CLICK_AND_DRAG,
-      [BehaviorCategory.POINTS]: ShapeBehavior[BehaviorCategory.POINTS].RADIUS,
-      [BehaviorCategory.RATIO]: ShapeBehavior[BehaviorCategory.RATIO].FREE,
-    },
-  },
-});
-// Make a large handle for demo purpose
-widgets.circleWidget.getWidgetState().getPoint1Handle().setScale1(20);
-widgets.circleWidget
-  .getWidgetState()
-  .setTextPosition([
-    TextPosition.MAX,
-    TextPosition.CENTER,
-    TextPosition.CENTER,
-  ]);
-
-scene.rectangleHandle = scene.widgetManager.addWidget(
-  widgets.rectangleWidget,
-  ViewTypes.SLICE
-);
-scene.rectangleHandle.setHandleVisibility(false);
-scene.rectangleHandle.setTextProps({
-  ...scene.rectangleHandle.getTextProps(),
-  'text-anchor': 'middle',
-  verticalAlign: VerticalTextAlignment.MIDDLE,
-});
-widgets.rectangleWidget
-  .getWidgetState()
-  .setTextPosition([
-    TextPosition.CENTER,
-    TextPosition.CENTER,
-    TextPosition.CENTER,
-  ]);
-
-scene.ellipseHandle = scene.widgetManager.addWidget(
-  widgets.ellipseWidget,
-  ViewTypes.SLICE
-);
-scene.ellipseHandle.setTextProps({
-  ...scene.ellipseHandle.getTextProps(),
-  'text-anchor': 'middle',
-  verticalAlign: VerticalTextAlignment.MIDDLE,
-});
-
-scene.circleHandle = scene.widgetManager.addWidget(
-  widgets.circleWidget,
-  ViewTypes.SLICE
-);
-scene.circleHandle.setGlyphResolution(64);
-
-scene.widgetManager.grabFocus(widgets.ellipseWidget);
-let activeWidget = 'ellipseWidget';
+const container = document.querySelector('body');
+const controlContainer = document.createElement('div');
+controlContainer.innerHTML = controlPanel;
+container.appendChild(controlContainer);
 
 // ----------------------------------------------------------------------------
-// Ready logic
+// Setup rendering code
 // ----------------------------------------------------------------------------
 
-function ready(scope, picking = false) {
-  scope.renderer.resetCamera();
-  scope.fullScreenRenderer.resize();
-  if (picking) {
-    scope.widgetManager.enablePicking();
-  } else {
-    scope.widgetManager.disablePicking();
+/**
+ * Function to create synthetic image data with correct dimensions
+ * Can be use for debug
+ * @param {Array[Int]} dims
+ */
+// eslint-disable-next-line no-unused-vars
+function createSyntheticImageData(dims) {
+  const imageData = vtkImageData.newInstance();
+  const newArray = new Uint8Array(dims[0] * dims[1] * dims[2]);
+  const s = 0.1;
+  imageData.setSpacing(s, s, s);
+  imageData.setExtent(0, 127, 0, 127, 0, 127);
+  let i = 0;
+  for (let z = 0; z < dims[2]; z++) {
+    for (let y = 0; y < dims[1]; y++) {
+      for (let x = 0; x < dims[0]; x++) {
+        newArray[i++] = (256 * (i % (dims[0] * dims[1]))) / (dims[0] * dims[1]);
+      }
+    }
   }
+
+  const da = vtkDataArray.newInstance({
+    numberOfComponents: 1,
+    values: newArray,
+  });
+  da.setName('scalars');
+
+  imageData.getPointData().setScalars(da);
+
+  return imageData;
 }
 
-function readyAll() {
-  ready(scene, true);
+function createRGBStringFromRGBValues(rgb) {
+  if (rgb.length !== 3) {
+    return 'rgb(0, 0, 0)';
+  }
+  return `rgb(${(rgb[0] * 255).toString()}, ${(rgb[1] * 255).toString()}, ${(
+    rgb[2] * 255
+  ).toString()})`;
 }
 
-function updateControlPanel(im, ds) {
-  const slicingMode = im.getSlicingMode();
-  const extent = ds.getExtent();
-  document.querySelector('.slice').setAttribute('min', extent[slicingMode * 2]);
-  document
-    .querySelector('.slice')
-    .setAttribute('max', extent[slicingMode * 2 + 1]);
-}
+const initialPlanesState = { ...widgetState.getPlanes() };
 
-function updateWidgetVisibility(widget, slicePos, i, widgetIndex) {
-  /* testing if the widget is on the slice and has been placed to modify visibility */
-  const widgetVisibility =
-    !scene.widgetManager.getWidgets()[widgetIndex].getPoint1() ||
-    widget.getWidgetState().getPoint1Handle().getOrigin()[i] === slicePos[i];
-  return widget.setVisibility(widgetVisibility);
-}
+let view3D = null;
 
-function updateWidgetsVisibility(slicePos, slicingMode) {
-  updateWidgetVisibility(widgets.rectangleWidget, slicePos, slicingMode, 0);
-  updateWidgetVisibility(widgets.ellipseWidget, slicePos, slicingMode, 1);
-  updateWidgetVisibility(widgets.circleWidget, slicePos, slicingMode, 2);
+for (let i = 0; i < 4; i++) {
+  const element = document.createElement('div');
+  element.setAttribute('class', 'view');
+  element.style.width = '50%';
+  element.style.height = '300px';
+  element.style.display = 'inline-block';
+  container.appendChild(element);
+
+  const grw = vtkGenericRenderWindow.newInstance();
+  grw.setContainer(element);
+  grw.resize();
+  const obj = {
+    renderWindow: grw.getRenderWindow(),
+    renderer: grw.getRenderer(),
+    GLWindow: grw.getOpenGLRenderWindow(),
+    interactor: grw.getInteractor(),
+    widgetManager: vtkWidgetManager.newInstance(),
+  };
+
+  obj.renderer.getActiveCamera().setParallelProjection(true);
+  obj.renderer.setBackground(...viewColors[i]);
+  obj.renderWindow.addRenderer(obj.renderer);
+  obj.renderWindow.addView(obj.GLWindow);
+  obj.renderWindow.setInteractor(obj.interactor);
+  obj.interactor.setView(obj.GLWindow);
+  obj.interactor.initialize();
+  obj.interactor.bindEvents(element);
+  obj.widgetManager.setRenderer(obj.renderer);
+  if (i < 3) {
+    obj.interactor.setInteractorStyle(vtkInteractorStyleImage.newInstance());
+    obj.widgetInstance = obj.widgetManager.addWidget(widget, xyzToViewType[i]);
+    obj.widgetInstance.setScaleInPixels(true);
+    obj.widgetInstance.setRotationHandlePosition(0.75);
+    obj.widgetManager.enablePicking();
+    // Use to update all renderers buffer when actors are moved
+    obj.widgetManager.setCaptureOn(CaptureOn.MOUSE_MOVE);
+  } else {
+    obj.interactor.setInteractorStyle(
+      vtkInteractorStyleTrackballCamera.newInstance()
+    );
+  }
+
+  obj.reslice = vtkImageReslice.newInstance();
+  obj.reslice.setSlabMode(SlabMode.MEAN);
+  obj.reslice.setSlabNumberOfSlices(1);
+  obj.reslice.setTransformInputSampling(false);
+  obj.reslice.setAutoCropOutput(true);
+  obj.reslice.setOutputDimensionality(2);
+  obj.resliceMapper = vtkImageMapper.newInstance();
+  obj.resliceMapper.setInputConnection(obj.reslice.getOutputPort());
+  obj.resliceActor = vtkImageSlice.newInstance();
+  obj.resliceActor.setMapper(obj.resliceMapper);
+  obj.sphereActors = [];
+  obj.sphereSources = [];
+
+  // Create sphere for each 2D views which will be displayed in 3D
+  // Define origin, point1 and point2 of the plane used to reslice the volume
+  for (let j = 0; j < 3; j++) {
+    const sphere = vtkSphereSource.newInstance();
+    sphere.setRadius(10);
+    const mapper = vtkMapper.newInstance();
+    mapper.setInputConnection(sphere.getOutputPort());
+    const actor = vtkActor.newInstance();
+    actor.setMapper(mapper);
+    actor.getProperty().setColor(...viewColors[i]);
+    actor.setVisibility(showDebugActors);
+    obj.sphereActors.push(actor);
+    obj.sphereSources.push(sphere);
+  }
+
+  if (i < 3) {
+    viewAttributes.push(obj);
+  } else {
+    view3D = obj;
+  }
+
+  // create axes
+  const axes = vtkAnnotatedCubeActor.newInstance();
+  axes.setDefaultStyle({
+    text: '+X',
+    fontStyle: 'bold',
+    fontFamily: 'Arial',
+    fontColor: 'black',
+    fontSizeScale: (res) => res / 2,
+    faceColor: createRGBStringFromRGBValues(viewColors[0]),
+    faceRotation: 0,
+    edgeThickness: 0.1,
+    edgeColor: 'black',
+    resolution: 400,
+  });
+  // axes.setXPlusFaceProperty({ text: '+X' });
+  axes.setXMinusFaceProperty({
+    text: '-X',
+    faceColor: createRGBStringFromRGBValues(viewColors[0]),
+    faceRotation: 90,
+    fontStyle: 'italic',
+  });
+  axes.setYPlusFaceProperty({
+    text: '+Y',
+    faceColor: createRGBStringFromRGBValues(viewColors[1]),
+    fontSizeScale: (res) => res / 4,
+  });
+  axes.setYMinusFaceProperty({
+    text: '-Y',
+    faceColor: createRGBStringFromRGBValues(viewColors[1]),
+    fontColor: 'white',
+  });
+  axes.setZPlusFaceProperty({
+    text: '+Z',
+    faceColor: createRGBStringFromRGBValues(viewColors[2]),
+  });
+  axes.setZMinusFaceProperty({
+    text: '-Z',
+    faceColor: createRGBStringFromRGBValues(viewColors[2]),
+    faceRotation: 45,
+  });
+
+  // create orientation widget
+  const orientationWidget = vtkOrientationMarkerWidget.newInstance({
+    actor: axes,
+    interactor: obj.renderWindow.getInteractor(),
+  });
+  orientationWidget.setEnabled(true);
+  orientationWidget.setViewportCorner(
+    vtkOrientationMarkerWidget.Corners.BOTTOM_RIGHT
+  );
+  orientationWidget.setViewportSize(0.15);
+  orientationWidget.setMinPixelSize(100);
+  orientationWidget.setMaxPixelSize(300);
 }
 
 // ----------------------------------------------------------------------------
 // Load image
 // ----------------------------------------------------------------------------
 
-const image = {
-  imageMapper: vtkImageMapper.newInstance(),
-  actor: vtkImageSlice.newInstance(),
-};
-
-// background image pipeline
-image.actor.setMapper(image.imageMapper);
-
-const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
-reader
-  .setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`, { loadData: true })
-  .then(() => {
-    const data = reader.getOutputData();
-    image.data = data;
-
-    // set input data
-    image.imageMapper.setInputData(data);
-
-    // add actors to renderers
-    scene.renderer.addViewProp(image.actor);
-    // default slice orientation/mode and camera view
-    const sliceMode = vtkImageMapper.SlicingMode.K;
-    image.imageMapper.setSlicingMode(sliceMode);
-    image.imageMapper.setSlice(0);
-
-    // set 2D camera position
-    setCamera(sliceMode, scene.renderer, image.data);
-
-    updateControlPanel(image.imageMapper, data);
-
-    scene.rectangleHandle.getRepresentations()[1].setDrawBorder(true);
-    scene.rectangleHandle.getRepresentations()[1].setDrawFace(false);
-    scene.rectangleHandle.getRepresentations()[1].setOpacity(1);
-    scene.circleHandle.getRepresentations()[1].setDrawBorder(true);
-    scene.circleHandle.getRepresentations()[1].setDrawFace(false);
-    scene.circleHandle.getRepresentations()[1].setOpacity(1);
-    scene.ellipseHandle.getRepresentations()[1].setDrawBorder(true);
-    scene.ellipseHandle.getRepresentations()[1].setDrawFace(false);
-    scene.ellipseHandle.getRepresentations()[1].setOpacity(1);
-
-    // set text display callback
-    scene.ellipseHandle.onInteractionEvent(() => {
-      const worldBounds = scene.ellipseHandle.getBounds();
-      const { average, minimum, maximum } = image.data.computeHistogram(
-        worldBounds,
-        vtkSphere.isPointIn3DEllipse
-      );
-
-      const text = `average: ${average.toFixed(
-        0
-      )} \nmin: ${minimum} \nmax: ${maximum} `;
-
-      widgets.ellipseWidget.getWidgetState().getText().setText(text);
-    });
-
-    scene.circleHandle.onInteractionEvent(() => {
-      const worldBounds = scene.circleHandle.getBounds();
-
-      const text = `radius: ${(
-        vec3.distance(
-          [worldBounds[0], worldBounds[2], worldBounds[4]],
-          [worldBounds[1], worldBounds[3], worldBounds[5]]
-        ) / 2
-      ).toFixed(2)}`;
-      widgets.circleWidget.getWidgetState().getText().setText(text);
-    });
-
-    scene.rectangleHandle.onInteractionEvent(() => {
-      const worldBounds = scene.rectangleHandle.getBounds();
-
-      const dx = Math.abs(worldBounds[0] - worldBounds[1]);
-      const dy = Math.abs(worldBounds[2] - worldBounds[3]);
-      const dz = Math.abs(worldBounds[4] - worldBounds[5]);
-
-      const perimeter = 2 * (dx + dy + dz);
-      const area = dx * dy + dy * dz + dz * dx;
-
-      const text = `perimeter: ${perimeter.toFixed(1)}mm\narea: ${area.toFixed(
-        1
-      )}mm²`;
-      widgets.rectangleWidget.getWidgetState().getText().setText(text);
-    });
-
-    const update = () => {
-      const slicingMode = image.imageMapper.getSlicingMode() % 3;
-
-      if (slicingMode > -1) {
-        const ijk = [0, 0, 0];
-        const slicePos = [0, 0, 0];
-
-        // position
-        ijk[slicingMode] = image.imageMapper.getSlice();
-        data.indexToWorld(ijk, slicePos);
-
-        widgets.rectangleWidget.getManipulator().setOrigin(slicePos);
-        widgets.ellipseWidget.getManipulator().setOrigin(slicePos);
-        widgets.circleWidget.getManipulator().setOrigin(slicePos);
-
-        updateWidgetsVisibility(slicePos, slicingMode);
-
-        scene.renderWindow.render();
-
-        // update UI
-        document
-          .querySelector('.slice')
-          .setAttribute('max', data.getDimensions()[slicingMode] - 1);
-      }
-    };
-    image.imageMapper.onModified(update);
-    // trigger initial update
-    update();
-
-    readyAll();
-  });
-
-// register readyAll to resize event
-window.addEventListener('resize', readyAll);
-readyAll();
-
-// ----------------------------------------------------------------------------
-// UI logic
-// ----------------------------------------------------------------------------
-
-function resetWidgets() {
-  scene.rectangleHandle.reset();
-  scene.ellipseHandle.reset();
-  scene.circleHandle.reset();
-  const slicingMode = image.imageMapper.getSlicingMode() % 3;
-  updateWidgetsVisibility(null, slicingMode);
-  scene.widgetManager.grabFocus(widgets[activeWidget]);
+function updateReslice(
+  interactionContext = {
+    viewType: '',
+    reslice: null,
+    actor: null,
+    renderer: null,
+    resetFocalPoint: false, // Reset the focal point to the center of the display image
+    keepFocalPointPosition: false, // Defines if the focal point position is kepts (same display distance from reslice cursor center)
+    computeFocalPointOffset: false, // Defines if the display offset between reslice center and focal point has to be
+    // computed. If so, then this offset will be used to keep the focal point position during rotation.
+    spheres: null,
+  }
+) {
+  const obj = widget.updateReslicePlane(
+    interactionContext.reslice,
+    interactionContext.viewType
+  );
+  if (obj.modified) {
+    // Get returned modified from setter to know if we have to render
+    interactionContext.actor.setUserMatrix(
+      interactionContext.reslice.getResliceAxes()
+    );
+    interactionContext.sphereSources[0].setCenter(...obj.origin);
+    interactionContext.sphereSources[1].setCenter(...obj.point1);
+    interactionContext.sphereSources[2].setCenter(...obj.point2);
+  }
+  widget.updateCameraPoints(
+    interactionContext.renderer,
+    interactionContext.viewType,
+    interactionContext.resetFocalPoint,
+    interactionContext.keepFocalPointPosition,
+    interactionContext.computeFocalPointOffset
+  );
+  view3D.renderWindow.render();
+  return obj.modified;
 }
 
-document.querySelector('.slice').addEventListener('input', (ev) => {
-  image.imageMapper.setSlice(Number(ev.target.value));
+const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
+reader.setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`).then(() => {
+  reader.loadData().then(() => {
+    const image = reader.getOutputData();
+    widget.setImage(image);
+
+    // Create image outline in 3D view
+    const outline = vtkOutlineFilter.newInstance();
+    outline.setInputData(image);
+    const outlineMapper = vtkMapper.newInstance();
+    outlineMapper.setInputData(outline.getOutputData());
+    const outlineActor = vtkActor.newInstance();
+    outlineActor.setMapper(outlineMapper);
+    view3D.renderer.addActor(outlineActor);
+
+    viewAttributes.forEach((obj, i) => {
+      obj.reslice.setInputData(image);
+      obj.renderer.addActor(obj.resliceActor);
+      view3D.renderer.addActor(obj.resliceActor);
+      obj.sphereActors.forEach((actor) => {
+        obj.renderer.addActor(actor);
+        view3D.renderer.addActor(actor);
+      });
+      const reslice = obj.reslice;
+      const viewType = xyzToViewType[i];
+
+      viewAttributes
+        // No need to update plane nor refresh when interaction
+        // is on current view. Plane can't be changed with interaction on current
+        // view. Refreshs happen automatically with `animation`.
+        // Note: Need to refresh also the current view because of adding the mouse wheel
+        // to change slicer
+        .forEach((v) => {
+          // Interactions in other views may change current plane
+          v.widgetInstance.onInteractionEvent(
+            // computeFocalPointOffset: Boolean which defines if the offset between focal point and
+            // reslice cursor display center has to be recomputed (while translation is applied)
+            // canUpdateFocalPoint: Boolean which defines if the focal point can be updated because
+            // the current interaction is a rotation
+            ({ computeFocalPointOffset, canUpdateFocalPoint }) => {
+              const activeViewType = widget
+                .getWidgetState()
+                .getActiveViewType();
+              const keepFocalPointPosition =
+                activeViewType !== viewType && canUpdateFocalPoint;
+              updateReslice({
+                viewType,
+                reslice,
+                actor: obj.resliceActor,
+                renderer: obj.renderer,
+                resetFocalPoint: false,
+                keepFocalPointPosition,
+                computeFocalPointOffset,
+                sphereSources: obj.sphereSources,
+              });
+            }
+          );
+        });
+
+      updateReslice({
+        viewType,
+        reslice,
+        actor: obj.resliceActor,
+        renderer: obj.renderer,
+        resetFocalPoint: true, // At first initilization, center the focal point to the image center
+        keepFocalPointPosition: false, // Don't update the focal point as we already set it to the center of the image
+        computeFocalPointOffset: true, // Allow to compute the current offset between display reslice center and display focal point
+        sphereSources: obj.sphereSources,
+      });
+      obj.renderWindow.render();
+    });
+
+    view3D.renderer.resetCamera();
+    view3D.renderer.resetCameraClippingRange();
+
+    // set max number of slices to slider.
+    const maxNumberOfSlices = vec3.length(image.getDimensions());
+    document.getElementById('slabNumber').max = maxNumberOfSlices;
+  });
 });
 
-document.querySelector('.axis').addEventListener('input', (ev) => {
-  const sliceMode = 'IJKXYZ'.indexOf(ev.target.value) % 3;
-  image.imageMapper.setSlicingMode(sliceMode);
+// ----------------------------------------------------------------------------
+// Define panel interactions
+// ----------------------------------------------------------------------------
+function updateViews() {
+  viewAttributes.forEach((obj, i) => {
+    updateReslice({
+      viewType: xyzToViewType[i],
+      reslice: obj.reslice,
+      actor: obj.resliceActor,
+      renderer: obj.renderer,
+      resetFocalPoint: true,
+      keepFocalPointPosition: false,
+      computeFocalPointOffset: true,
+      sphereSources: obj.sphereSources,
+      resetViewUp: true,
+    });
+    obj.renderWindow.render();
+  });
+  view3D.renderer.resetCamera();
+  view3D.renderer.resetCameraClippingRange();
+}
 
-  setCamera(sliceMode, scene.renderer, image.data);
-  resetWidgets();
-  scene.renderWindow.render();
+const checkboxOrthogonality = document.getElementById('checkboxOrthogality');
+checkboxOrthogonality.addEventListener('change', (ev) => {
+  widgetState.setKeepOrthogonality(checkboxOrthogonality.checked);
 });
 
-document.querySelector('.widget').addEventListener('input', (ev) => {
-  // For demo purpose, hide ellipse handles when the widget loses focus
-  if (activeWidget === 'ellipseWidget') {
-    widgets.ellipseWidget.setHandleVisibility(false);
-  }
-  scene.widgetManager.grabFocus(widgets[ev.target.value]);
-  activeWidget = ev.target.value;
-  if (activeWidget === 'ellipseWidget') {
-    widgets.ellipseWidget.setHandleVisibility(true);
-    scene.ellipseHandle.updateRepresentationForRender();
-  }
+const checkboxRotation = document.getElementById('checkboxRotation');
+checkboxRotation.addEventListener('change', (ev) => {
+  widgetState.setEnableRotation(checkboxRotation.checked);
 });
 
-document.querySelector('.reset').addEventListener('click', () => {
-  resetWidgets();
-  scene.renderWindow.render();
+const checkboxTranslation = document.getElementById('checkboxTranslation');
+checkboxTranslation.addEventListener('change', (ev) => {
+  widgetState.setEnableTranslation(checkboxTranslation.checked);
 });
 
-global.scene = scene;
-global.widgets = widgets;
+const checkboxScaleInPixels = document.getElementById('checkboxScaleInPixels');
+checkboxScaleInPixels.addEventListener('change', (ev) => {
+  viewAttributes.forEach((obj) => {
+    obj.widgetInstance.setScaleInPixels(checkboxScaleInPixels.checked);
+    obj.interactor.render();
+  });
+});
+
+const optionSlabModeMin = document.getElementById('slabModeMin');
+optionSlabModeMin.value = SlabMode.MIN;
+const optionSlabModeMax = document.getElementById('slabModeMax');
+optionSlabModeMax.value = SlabMode.MAX;
+const optionSlabModeMean = document.getElementById('slabModeMean');
+optionSlabModeMean.value = SlabMode.MEAN;
+const optionSlabModeSum = document.getElementById('slabModeSum');
+optionSlabModeSum.value = SlabMode.SUM;
+const selectSlabMode = document.getElementById('slabMode');
+selectSlabMode.addEventListener('change', (ev) => {
+  viewAttributes.forEach((obj) => {
+    obj.reslice.setSlabMode(Number(ev.target.value));
+  });
+  updateViews();
+});
+
+const sliderSlabNumberofSlices = document.getElementById('slabNumber');
+sliderSlabNumberofSlices.addEventListener('change', (ev) => {
+  const trSlabNumberValue = document.getElementById('slabNumberValue');
+  trSlabNumberValue.innerHTML = ev.target.value;
+  viewAttributes.forEach((obj) => {
+    obj.reslice.setSlabNumberOfSlices(ev.target.value);
+  });
+  updateViews();
+});
+
+const buttonReset = document.getElementById('buttonReset');
+buttonReset.addEventListener('click', () => {
+  widgetState.setPlanes({ ...initialPlanesState });
+  widget.setCenter(widget.getWidgetState().getImage().getCenter());
+  updateViews();
+});
