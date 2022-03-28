@@ -1,70 +1,113 @@
-import '@kitware/vtk.js/Rendering/Profiles/Geometry';
-import '@kitware/vtk.js/Rendering/Profiles/Glyph';
+import '@kitware/vtk.js/Rendering/Profiles/All';
 
-import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
-import vtkConeSource from '@kitware/vtk.js/Filters/Sources/ConeSource';
-import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
-import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
-import vtkPolyLineWidget from '@kitware/vtk.js/Widgets/Widgets3D/PolyLineWidget';
-import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
+import vtkHttpDataSetReader from '@kitware/vtk.js/IO/Core/HttpDataSetReader';
+import '@kitware/vtk.js/Rendering/Misc/RenderingAPIs';
+import vtkResliceCursor from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursor';
+import vtkResliceCursorLineRepresentation from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursorLineRepresentation';
+import vtkResliceCursorWidget from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursorWidget';
+import vtkRenderer from '@kitware/vtk.js/Rendering/Core/Renderer';
+import vtkRenderWindow from '@kitware/vtk.js/Rendering/Core/RenderWindow';
+import vtkRenderWindowInteractor from '@kitware/vtk.js/Rendering/Core/RenderWindowInteractor';
 
-const controlPanel = `
-<button>GrabFocus</button>
-<input type="checkbox">Show SVG layer
-<style>
-button {
-  margin-top: 100px;
-}
-</style>
-`
+// Force the loading of HttpDataAccessHelper to support gzip decompression
+import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
 
 // ----------------------------------------------------------------------------
 // Standard rendering code setup
 // ----------------------------------------------------------------------------
+const container = document.querySelector('body');
 
-const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
-  background: [0, 0, 0],
-});
-const renderer = fullScreenRenderer.getRenderer();
+// Define ResliceCursor
 
-const cone = vtkConeSource.newInstance();
-const mapper = vtkMapper.newInstance();
-const actor = vtkActor.newInstance();
+const resliceCursor = vtkResliceCursor.newInstance();
 
-actor.setMapper(mapper);
-mapper.setInputConnection(cone.getOutputPort());
-actor.getProperty().setOpacity(0.5);
+const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
+reader.setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`).then(() => {
+  reader.loadData().then(() => {
+    const image = reader.getOutputData();
+    resliceCursor.setImage(image);
 
-renderer.addActor(actor);
+    const renderWindows = [];
+    const renderers = [];
+    const GLWindows = [];
+    const interactors = [];
+    const resliceCursorWidgets = [];
+    const resliceCursorRepresentations = [];
 
-// ----------------------------------------------------------------------------
-// Widget manager
-// ----------------------------------------------------------------------------
+    const table = document.createElement('table');
+    table.setAttribute('id', 'table');
+    container.appendChild(table);
 
-const widgetManager = vtkWidgetManager.newInstance();
-widgetManager.setRenderer(renderer);
+    const tr1 = document.createElement('tr');
+    tr1.setAttribute('id', 'line1');
+    table.appendChild(tr1);
 
-const widget = vtkPolyLineWidget.newInstance();
-widget.placeWidget(cone.getOutputData().getBounds());
+    const tr2 = document.createElement('tr');
+    tr2.setAttribute('id', 'line2');
+    table.appendChild(tr2);
 
-widgetManager.addWidget(widget);
+    for (let j = 0; j < 3; ++j) {
+      const element = document.createElement('td');
 
-renderer.resetCamera();
-widgetManager.enablePicking();
-widgetManager.grabFocus(widget);
+      if (j === 2) {
+        tr2.appendChild(element);
+      } else {
+        tr1.appendChild(element);
+      }
 
-// -----------------------------------------------------------
-// UI control handling
-// -----------------------------------------------------------
+      renderWindows[j] = vtkRenderWindow.newInstance();
+      renderers[j] = vtkRenderer.newInstance();
+      renderers[j].getActiveCamera().setParallelProjection(true);
+      renderWindows[j].addRenderer(renderers[j]);
 
-fullScreenRenderer.addController(controlPanel);
+      GLWindows[j] = renderWindows[j].newAPISpecificView();
+      GLWindows[j].setContainer(element);
+      renderWindows[j].addView(GLWindows[j]);
 
-document.querySelector('button').addEventListener('click', () => {
-  widgetManager.grabFocus(widget);
-});
+      interactors[j] = vtkRenderWindowInteractor.newInstance();
+      interactors[j].setView(GLWindows[j]);
+      interactors[j].initialize();
+      interactors[j].bindEvents(element);
 
-document
-  .querySelector('input[type=checkbox]')
-  .addEventListener('change', (ev) => {
-    widgetManager.setUseSvgLayer(ev.target.checked);
+      renderWindows[j].setInteractor(interactors[j]);
+
+      resliceCursorWidgets[j] = vtkResliceCursorWidget.newInstance();
+      resliceCursorRepresentations[j] =
+        vtkResliceCursorLineRepresentation.newInstance();
+      resliceCursorWidgets[j].setWidgetRep(resliceCursorRepresentations[j]);
+      resliceCursorRepresentations[j].getReslice().setInputData(image);
+      resliceCursorRepresentations[j]
+        .getCursorAlgorithm()
+        .setResliceCursor(resliceCursor);
+
+      resliceCursorWidgets[j].setInteractor(interactors[j]);
+    }
+
+    // X
+    resliceCursorRepresentations[0]
+      .getCursorAlgorithm()
+      .setReslicePlaneNormalToXAxis();
+
+    // Y
+    resliceCursorRepresentations[1]
+      .getCursorAlgorithm()
+      .setReslicePlaneNormalToYAxis();
+
+    // Z
+    resliceCursorRepresentations[2]
+      .getCursorAlgorithm()
+      .setReslicePlaneNormalToZAxis();
+
+    for (let k = 0; k < 3; k++) {
+      resliceCursorWidgets[k].onInteractionEvent(() => {
+        resliceCursorWidgets[0].render();
+        resliceCursorWidgets[1].render();
+        resliceCursorWidgets[2].render();
+      });
+      resliceCursorWidgets[k].setEnabled(true);
+
+      renderers[k].resetCamera();
+      renderWindows[k].render();
+    }
   });
+});
