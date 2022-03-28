@@ -4,7 +4,65 @@
   <head>
     <meta charset="utf-8" />
   </head>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500&display=swap');
+body {
+  margin: 0;
+  background: #24252a;
+}
+img {
+  
+}
+li, a, button {
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 500;
+  font-size: 16px;
+  color: #edf0f1;
+  text-decoration: none;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 10%;
+}
+.navlinks {
+  list-style: none;
+}
+.navlinks li {
+  display: inline-block;
+  padding: 0px 20px;
+}
+.navlinks li a {
+  transition: all 0.3s ease 0s;
+}
+.navlinks li a:hover {
+  color: #0088a9;
+}
+button {
+  padding: 9px 25px;
+  background-color: #0087a9;
+  border: none;
+  border-radius: 5em;
+  cursor: pointer;
+  transition: all 0.3s ease 0s;
+}
+button:hover {
+  background-color: rgba(0, 135, 169, 0.8);
+}
+  </style>
   <body>
+    <header>
+      <img src="Rediminds.png" alt="logo">
+      <nav>
+          <ul class="navlinks">
+               <li><a href="#">Services</a></li>
+               <li><a href="#">Projects</a></li>
+               <li><a href="#">About</a></li>
+          </ul>
+      </nav>
+      <a href="#" class="cta"><button>Contact</button></a>
+    </header>
     <script src="main.js"></script>
   </body>
 </html>
