@@ -11,14 +11,11 @@ body {
   background: #24252a;
   
 }
-
-li, a, button {
-  font-family: 'Montserrat', sans-serif;
-  font-weight: 500;
-  font-size: 16px;
-  color: #edf0f1;
-  text-decoration: none;
+img {
+  height: 30px;
+  width: 130px;
 }
+
 header {
   display: flex;
   justify-content: space-between;
@@ -27,6 +24,7 @@ header {
   position: relative;
   background: black;
   z-index: 10;
+  height: 50px;
 }
 .navlinks {
   list-style: none;
@@ -41,17 +39,7 @@ header {
 .navlinks li a:hover {
   color: #0088a9;
 }
-button {
-  padding: 9px 25px;
-  background-color: #0087a9;
-  border: none;
-  border-radius: 5em;
-  cursor: pointer;
-  transition: all 0.3s ease 0s;
-}
-button:hover {
-  background-color: rgba(0, 135, 169, 0.8);
-}
+
   </style>
   <body>
     <header>
@@ -63,7 +51,7 @@ button:hover {
                <li><a href="#">About</a></li> -->
           </ul>
       </nav>
-      <a href="#" class="cta"><button>Contact</button></a>
+      
     </header>
     <script src="main.js"></script>
   </body>
