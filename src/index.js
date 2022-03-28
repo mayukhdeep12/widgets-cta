@@ -1,111 +1,57 @@
+// Load the rendering pieces we want to use (for both WebGL and WebGPU)
 import '@kitware/vtk.js/Rendering/Profiles/Geometry';
-import '@kitware/vtk.js/Rendering/Profiles/Glyph';
 
+import vtkLabelWidget from '@kitware/vtk.js/Interaction/Widgets/LabelWidget';
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
-import vtkOrientationMarkerWidget from '@kitware/vtk.js/Interaction/Widgets/OrientationMarkerWidget';
-import vtkAxesActor from '@kitware/vtk.js/Rendering/Core/AxesActor';
 
-import vtkInteractiveOrientationWidget from '@kitware/vtk.js/Widgets/Widgets3D/InteractiveOrientationWidget';
-import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
-
-import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
-import vtkConeSource from '@kitware/vtk.js/Filters/Sources/ConeSource';
-import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
-
-import * as vtkMath from '@kitware/vtk.js/Common/Core/Math';
+import TextAlign from '@kitware/vtk.js/Interaction/Widgets/LabelRepresentation/Constants';
 
 // ----------------------------------------------------------------------------
-
-function majorAxis(vec3, idxA, idxB) {
-  const axis = [0, 0, 0];
-  const idx = Math.abs(vec3[idxA]) > Math.abs(vec3[idxB]) ? idxA : idxB;
-  const value = vec3[idx] > 0 ? 1 : -1;
-  axis[idx] = value;
-  return axis;
-}
+// USER AVAILABLE INTERACTIONS
+// ----------------------------------------------------------------------------
+// Text can be translated
 
 // ----------------------------------------------------------------------------
 // Standard rendering code setup
 // ----------------------------------------------------------------------------
 
-const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
-  background: [0, 0, 0],
-});
+const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance();
 const renderer = fullScreenRenderer.getRenderer();
 const renderWindow = fullScreenRenderer.getRenderWindow();
-const render = renderWindow.render;
+renderWindow.getInteractor().setInteractorStyle(null);
 
-const axes = vtkAxesActor.newInstance();
-const orientationWidget = vtkOrientationMarkerWidget.newInstance({
-  actor: axes,
-  interactor: renderWindow.getInteractor(),
+// ----------------------------------------------------------------------------
+// Create widget
+// ----------------------------------------------------------------------------
+
+const widget = vtkLabelWidget.newInstance();
+widget.setInteractor(renderWindow.getInteractor());
+widget.setEnabled(1);
+widget.getWidgetRep().setLabelText('Hello world!\nThis is an example!');
+
+const widget2 = vtkLabelWidget.newInstance();
+widget2.setInteractor(renderWindow.getInteractor());
+widget2.setEnabled(1);
+widget2.getWidgetRep().setLabelText('And I am the second one!');
+widget2.getWidgetRep().setLabelStyle({
+  fontSize: 12,
+  strokeColor: 'red',
 });
-orientationWidget.setEnabled(true);
-orientationWidget.setViewportCorner(
-  vtkOrientationMarkerWidget.Corners.BOTTOM_LEFT
-);
-orientationWidget.setViewportSize(0.15);
-orientationWidget.setMinPixelSize(100);
-orientationWidget.setMaxPixelSize(300);
+widget2.getWidgetRep().setWorldPosition([3, 1, 10]);
 
-// ----------------------------------------------------------------------------
-// Add context to 3D scene for orientation
-// ----------------------------------------------------------------------------
+const widget3 = vtkLabelWidget.newInstance();
+widget3.setInteractor(renderWindow.getInteractor());
+widget3.setEnabled(1);
+widget3.getWidgetRep().setLabelText('This text is\nright aligned!');
+widget3.getWidgetRep().setTextAlign(TextAlign.RIGHT);
+widget3.getWidgetRep().setWorldPosition([1, -3, 10]);
 
-const cone = vtkConeSource.newInstance();
-const mapper = vtkMapper.newInstance();
-const actor = vtkActor.newInstance({ pickable: false });
-
-actor.setMapper(mapper);
-mapper.setInputConnection(cone.getOutputPort());
-renderer.addActor(actor);
-
-const camera = renderer.getActiveCamera();
-
-// ----------------------------------------------------------------------------
-// Widget manager
-// ----------------------------------------------------------------------------
-
-const widgetManager = vtkWidgetManager.newInstance();
-widgetManager.setRenderer(orientationWidget.getRenderer());
-
-const widget = vtkInteractiveOrientationWidget.newInstance();
-widget.placeWidget(axes.getBounds());
-widget.setBounds(axes.getBounds());
-widget.setPlaceFactor(1);
-
-const vw = widgetManager.addWidget(widget);
-
-// Manage user interaction
-vw.onOrientationChange(({ up, direction, action, event }) => {
-  const focalPoint = camera.getFocalPoint();
-  const position = camera.getPosition();
-  const viewUp = camera.getViewUp();
-
-  const distance = Math.sqrt(
-    vtkMath.distance2BetweenPoints(position, focalPoint)
-  );
-  camera.setPosition(
-    focalPoint[0] + direction[0] * distance,
-    focalPoint[1] + direction[1] * distance,
-    focalPoint[2] + direction[2] * distance
-  );
-
-  if (direction[0]) {
-    camera.setViewUp(majorAxis(viewUp, 1, 2));
-  }
-  if (direction[1]) {
-    camera.setViewUp(majorAxis(viewUp, 0, 2));
-  }
-  if (direction[2]) {
-    camera.setViewUp(majorAxis(viewUp, 0, 1));
-  }
-
-  orientationWidget.updateMarkerOrientation();
-  widgetManager.enablePicking();
-  render();
-});
+const widget4 = vtkLabelWidget.newInstance();
+widget4.setInteractor(renderWindow.getInteractor());
+widget4.setEnabled(1);
+widget4.getWidgetRep().setLabelText('This text is\ncentered!');
+widget4.getWidgetRep().setTextAlign(TextAlign.CENTER);
+widget4.getWidgetRep().setWorldPosition([-3, -2, 10]);
 
 renderer.resetCamera();
-widgetManager.enablePicking();
-render();
+renderWindow.render();
