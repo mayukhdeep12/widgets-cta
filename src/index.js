@@ -1,113 +1,57 @@
-import '@kitware/vtk.js/Rendering/Profiles/All';
+// Load the rendering pieces we want to use (for both WebGL and WebGPU)
+import '@kitware/vtk.js/Rendering/Profiles/Geometry';
 
-import vtkHttpDataSetReader from '@kitware/vtk.js/IO/Core/HttpDataSetReader';
-import '@kitware/vtk.js/Rendering/Misc/RenderingAPIs';
-import vtkResliceCursor from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursor';
-import vtkResliceCursorLineRepresentation from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursorLineRepresentation';
-import vtkResliceCursorWidget from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursorWidget';
-import vtkRenderer from '@kitware/vtk.js/Rendering/Core/Renderer';
-import vtkRenderWindow from '@kitware/vtk.js/Rendering/Core/RenderWindow';
-import vtkRenderWindowInteractor from '@kitware/vtk.js/Rendering/Core/RenderWindowInteractor';
+import vtkLabelWidget from '@kitware/vtk.js/Interaction/Widgets/LabelWidget';
+import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
 
-// Force the loading of HttpDataAccessHelper to support gzip decompression
-import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
+import TextAlign from '@kitware/vtk.js/Interaction/Widgets/LabelRepresentation/Constants';
+
+// ----------------------------------------------------------------------------
+// USER AVAILABLE INTERACTIONS
+// ----------------------------------------------------------------------------
+// Text can be translated
 
 // ----------------------------------------------------------------------------
 // Standard rendering code setup
 // ----------------------------------------------------------------------------
-const container = document.querySelector('body');
 
-// Define ResliceCursor
+const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance();
+const renderer = fullScreenRenderer.getRenderer();
+const renderWindow = fullScreenRenderer.getRenderWindow();
+renderWindow.getInteractor().setInteractorStyle(null);
 
-const resliceCursor = vtkResliceCursor.newInstance();
+// ----------------------------------------------------------------------------
+// Create widget
+// ----------------------------------------------------------------------------
 
-const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
-reader.setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`).then(() => {
-  reader.loadData().then(() => {
-    const image = reader.getOutputData();
-    resliceCursor.setImage(image);
+const widget = vtkLabelWidget.newInstance();
+widget.setInteractor(renderWindow.getInteractor());
+widget.setEnabled(1);
+widget.getWidgetRep().setLabelText('Hello world!\nThis is an example!');
 
-    const renderWindows = [];
-    const renderers = [];
-    const GLWindows = [];
-    const interactors = [];
-    const resliceCursorWidgets = [];
-    const resliceCursorRepresentations = [];
-
-    const table = document.createElement('table');
-    table.setAttribute('id', 'table');
-    container.appendChild(table);
-
-    const tr1 = document.createElement('tr');
-    tr1.setAttribute('id', 'line1');
-    table.appendChild(tr1);
-
-    const tr2 = document.createElement('tr');
-    tr2.setAttribute('id', 'line2');
-    table.appendChild(tr2);
-
-    for (let j = 0; j < 3; ++j) {
-      const element = document.createElement('td');
-
-      if (j === 2) {
-        tr2.appendChild(element);
-      } else {
-        tr1.appendChild(element);
-      }
-
-      renderWindows[j] = vtkRenderWindow.newInstance();
-      renderers[j] = vtkRenderer.newInstance();
-      renderers[j].getActiveCamera().setParallelProjection(true);
-      renderWindows[j].addRenderer(renderers[j]);
-
-      GLWindows[j] = renderWindows[j].newAPISpecificView();
-      GLWindows[j].setContainer(element);
-      renderWindows[j].addView(GLWindows[j]);
-
-      interactors[j] = vtkRenderWindowInteractor.newInstance();
-      interactors[j].setView(GLWindows[j]);
-      interactors[j].initialize();
-      interactors[j].bindEvents(element);
-
-      renderWindows[j].setInteractor(interactors[j]);
-
-      resliceCursorWidgets[j] = vtkResliceCursorWidget.newInstance();
-      resliceCursorRepresentations[j] =
-        vtkResliceCursorLineRepresentation.newInstance();
-      resliceCursorWidgets[j].setWidgetRep(resliceCursorRepresentations[j]);
-      resliceCursorRepresentations[j].getReslice().setInputData(image);
-      resliceCursorRepresentations[j]
-        .getCursorAlgorithm()
-        .setResliceCursor(resliceCursor);
-
-      resliceCursorWidgets[j].setInteractor(interactors[j]);
-    }
-
-    // X
-    resliceCursorRepresentations[0]
-      .getCursorAlgorithm()
-      .setReslicePlaneNormalToXAxis();
-
-    // Y
-    resliceCursorRepresentations[1]
-      .getCursorAlgorithm()
-      .setReslicePlaneNormalToYAxis();
-
-    // Z
-    resliceCursorRepresentations[2]
-      .getCursorAlgorithm()
-      .setReslicePlaneNormalToZAxis();
-
-    for (let k = 0; k < 3; k++) {
-      resliceCursorWidgets[k].onInteractionEvent(() => {
-        resliceCursorWidgets[0].render();
-        resliceCursorWidgets[1].render();
-        resliceCursorWidgets[2].render();
-      });
-      resliceCursorWidgets[k].setEnabled(true);
-
-      renderers[k].resetCamera();
-      renderWindows[k].render();
-    }
-  });
+const widget2 = vtkLabelWidget.newInstance();
+widget2.setInteractor(renderWindow.getInteractor());
+widget2.setEnabled(1);
+widget2.getWidgetRep().setLabelText('And I am the second one!');
+widget2.getWidgetRep().setLabelStyle({
+  fontSize: 12,
+  strokeColor: 'red',
 });
+widget2.getWidgetRep().setWorldPosition([3, 1, 10]);
+
+const widget3 = vtkLabelWidget.newInstance();
+widget3.setInteractor(renderWindow.getInteractor());
+widget3.setEnabled(1);
+widget3.getWidgetRep().setLabelText('This text is\nright aligned!');
+widget3.getWidgetRep().setTextAlign(TextAlign.RIGHT);
+widget3.getWidgetRep().setWorldPosition([1, -3, 10]);
+
+const widget4 = vtkLabelWidget.newInstance();
+widget4.setInteractor(renderWindow.getInteractor());
+widget4.setEnabled(1);
+widget4.getWidgetRep().setLabelText('This text is\ncentered!');
+widget4.getWidgetRep().setTextAlign(TextAlign.CENTER);
+widget4.getWidgetRep().setWorldPosition([-3, -2, 10]);
+
+renderer.resetCamera();
+renderWindow.render();
