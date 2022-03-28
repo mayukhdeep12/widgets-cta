@@ -1,72 +1,77 @@
 import '@kitware/vtk.js/Rendering/Profiles/All';
 
 import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
-import vtkInteractorStyleImage from '@kitware/vtk.js/Interaction/Style/InteractorStyleImage';
-import vtkSplineWidget from '@kitware/vtk.js/Widgets/Widgets3D/SplineWidget';
 import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
+import vtkPaintWidget from '@kitware/vtk.js/Widgets/Widgets3D/PaintWidget';
+import vtkRectangleWidget from '@kitware/vtk.js/Widgets/Widgets3D/RectangleWidget';
+import vtkEllipseWidget from '@kitware/vtk.js/Widgets/Widgets3D/EllipseWidget';
+import vtkSplineWidget from '@kitware/vtk.js/Widgets/Widgets3D/SplineWidget';
+import vtkInteractorStyleImage from '@kitware/vtk.js/Interaction/Style/InteractorStyleImage';
+import vtkHttpDataSetReader from '@kitware/vtk.js/IO/Core/HttpDataSetReader';
+import vtkImageMapper from '@kitware/vtk.js/Rendering/Core/ImageMapper';
+import vtkImageSlice from '@kitware/vtk.js/Rendering/Core/ImageSlice';
+import vtkPaintFilter from '@kitware/vtk.js/Filters/General/PaintFilter';
+import vtkColorTransferFunction from '@kitware/vtk.js/Rendering/Core/ColorTransferFunction';
+import vtkPiecewiseFunction from '@kitware/vtk.js/Common/DataModel/PiecewiseFunction';
 
-import { splineKind } from '@kitware/vtk.js/Common/DataModel/Spline3D/Constants';
+// Force the loading of HttpDataAccessHelper to support gzip decompression
+import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
+
+import {
+  BehaviorCategory,
+  ShapeBehavior,
+} from '@kitware/vtk.js/Widgets/Widgets3D/ShapeWidget/Constants';
+
+import { ViewTypes } from '@kitware/vtk.js/Widgets/Core/WidgetManager/Constants';
+
+import { vec3 } from 'gl-matrix';
 
 const controlPanel = `
 <table>
   <tr>
-    <td>Kind</td>
-    <td></td>
+    <td>Radius Scale</td>
     <td>
-      <select class="kind">
-        <option value="kochanek">Kochanek</option>
-        <option value="cardinal">Cardinal</option>
+      <input class="radius" type="range" min="1" max="200" step="1" value="1">
+    </td>
+  </tr>
+  <tr>
+    <td>Slice #</td>
+    <td>
+      <input class="slice" type="range" min="0" max="0" step="1">
+    </td>
+  </tr>
+  <tr>
+    <td>Slice Axis</td>
+    <td>
+      <select class="axis">
+        <option name="I">I</option>
+        <option name="J">J</option>
+        <option name="K" selected>K</option>
       </select>
     </td>
   </tr>
   <tr>
-  <tr>
-    <td>Tension</td>
-    <td></td>
     <td>
-      <input class="tension" type="range" min="-1" max="1" step="0.1" value="0">
-    </td>
-  </tr>
-  <tr>
-    <td>Bias</td>
-    <td></td>
-    <td>
-      <input class="bias" type="range" min="-1" max="1" step="0.1" value="0">
-    </td>
-  </tr>
-  <tr>
-    <td>Continuity</td>
-    <td></td>
-    <td>
-      <input class="continuity" type="range" min="-1" max="1" step="0.1" value="0">
-    </td>
-  </tr>
-  <tr>
-    <td>Resolution</td>
-    <td></td>
-    <td>
-      <input class="resolution" type="range" min="1" max="32" step="1" value="20">
-    </td>
-  </tr>
-  <tr>
-    <td>Handles size</td>
-    <td></td>
-    <td>
-      <input class="handleSize" type="range" min="10" max="50" step="1" value="20">
-    </td>
-  </tr>
-  <tr>
-    <td>Drag (freehand)</td>
-    <td>
-      <input class="allowFreehand" type="checkbox" checked>
-    </td>
-    <td>
-      <input class="freehandDistance" type="range" min="0.05" max="1.0" step="0.05" value="0.2">
+      <select class="widget">
+        <option name="paintWidget" selected>paintWidget</option>
+        <option name="rectangleWidget">rectangleWidget</option>
+        <option name="ellipseWidget">ellipseWidget</option>
+        <option name="circleWidget">circleWidget</option>
+        <option name="splineWidget">splineWidget</option>
+        <option name="polygonWidget">polygonWidget</option>
+      </select>
     </td>
   </tr>
   <tr>
     <td>
-      <button class="placeWidget" >Place Widget</button>
+      <button class="focus">Grab focus</button>
+    </td>
+  </tr>
+  <tr>
+    <td>Undo/Redo</td>
+    <td>
+      <button class="undo">Undo</button>
+      <button class="redo">Redo</button>
     </td>
   </tr>
 </table>
@@ -81,107 +86,433 @@ table {
 // Standard rendering code setup
 // ----------------------------------------------------------------------------
 
-const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
-  background: [0, 0, 0],
+// scene
+const scene = {};
+
+scene.fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
+  rootContainer: document.body,
+  background: [0.1, 0.1, 0.1],
 });
-const renderer = fullScreenRenderer.getRenderer();
-const renderWindow = fullScreenRenderer.getRenderWindow();
-const iStyle = vtkInteractorStyleImage.newInstance();
-renderWindow.getInteractor().setInteractorStyle(iStyle);
+
+scene.renderer = scene.fullScreenRenderer.getRenderer();
+scene.renderWindow = scene.fullScreenRenderer.getRenderWindow();
+scene.apiSpecificRenderWindow = scene.fullScreenRenderer
+  .getInteractor()
+  .getView();
+scene.camera = scene.renderer.getActiveCamera();
+
+// setup 2D view
+scene.camera.setParallelProjection(true);
+scene.iStyle = vtkInteractorStyleImage.newInstance();
+scene.iStyle.setInteractionMode('IMAGE_SLICING');
+scene.renderWindow.getInteractor().setInteractorStyle(scene.iStyle);
+scene.fullScreenRenderer.addController(controlPanel);
+
+function setCamera(sliceMode, renderer, data) {
+  const ijk = [0, 0, 0];
+  const position = [0, 0, 0];
+  const focalPoint = [0, 0, 0];
+  data.indexToWorld(ijk, focalPoint);
+  ijk[sliceMode] = 1;
+  data.indexToWorld(ijk, position);
+  renderer.getActiveCamera().set({ focalPoint, position });
+  renderer.resetCamera();
+}
 
 // ----------------------------------------------------------------------------
-// Widget manager
+// Widget manager and vtkPaintFilter
 // ----------------------------------------------------------------------------
 
-const widgetManager = vtkWidgetManager.newInstance();
-widgetManager.setRenderer(renderer);
+scene.widgetManager = vtkWidgetManager.newInstance();
+scene.widgetManager.setRenderer(scene.renderer);
 
-const widget = vtkSplineWidget.newInstance();
+// Widgets
+const widgets = {};
+widgets.paintWidget = vtkPaintWidget.newInstance();
+widgets.rectangleWidget = vtkRectangleWidget.newInstance({
+  resetAfterPointPlacement: true,
+});
+widgets.ellipseWidget = vtkEllipseWidget.newInstance({
+  resetAfterPointPlacement: true,
+});
+widgets.circleWidget = vtkEllipseWidget.newInstance({
+  resetAfterPointPlacement: true,
+  modifierBehavior: {
+    None: {
+      [BehaviorCategory.PLACEMENT]:
+        ShapeBehavior[BehaviorCategory.PLACEMENT].CLICK_AND_DRAG,
+      [BehaviorCategory.POINTS]: ShapeBehavior[BehaviorCategory.POINTS].RADIUS,
+      [BehaviorCategory.RATIO]: ShapeBehavior[BehaviorCategory.RATIO].FREE,
+    },
+    Control: {
+      [BehaviorCategory.POINTS]:
+        ShapeBehavior[BehaviorCategory.POINTS].DIAMETER,
+    },
+  },
+});
+widgets.splineWidget = vtkSplineWidget.newInstance({
+  resetAfterPointPlacement: true,
+});
+widgets.polygonWidget = vtkSplineWidget.newInstance({
+  resetAfterPointPlacement: true,
+  resolution: 1,
+});
 
-const widgetRepresentation = widgetManager.addWidget(widget);
+scene.paintHandle = scene.widgetManager.addWidget(
+  widgets.paintWidget,
+  ViewTypes.SLICE
+);
+scene.rectangleHandle = scene.widgetManager.addWidget(
+  widgets.rectangleWidget,
+  ViewTypes.SLICE
+);
+scene.ellipseHandle = scene.widgetManager.addWidget(
+  widgets.ellipseWidget,
+  ViewTypes.SLICE
+);
+scene.circleHandle = scene.widgetManager.addWidget(
+  widgets.circleWidget,
+  ViewTypes.SLICE
+);
+scene.splineHandle = scene.widgetManager.addWidget(
+  widgets.splineWidget,
+  ViewTypes.SLICE
+);
+scene.polygonHandle = scene.widgetManager.addWidget(
+  widgets.polygonWidget,
+  ViewTypes.SLICE
+);
 
-renderer.resetCamera();
+scene.splineHandle.setOutputBorder(true);
+scene.polygonHandle.setOutputBorder(true);
 
-// -----------------------------------------------------------
-// UI control handling
-// -----------------------------------------------------------
+scene.widgetManager.grabFocus(widgets.paintWidget);
+let activeWidget = 'paintWidget';
 
-fullScreenRenderer.addController(controlPanel);
+// Paint filter
+const painter = vtkPaintFilter.newInstance();
 
-const tensionInput = document.querySelector('.tension');
-const onTensionChanged = () => {
-  widget.getWidgetState().setSplineTension(parseFloat(tensionInput.value));
-  renderWindow.render();
+// ----------------------------------------------------------------------------
+// Ready logic
+// ----------------------------------------------------------------------------
+
+function ready(scope, picking = false) {
+  scope.renderer.resetCamera();
+  scope.fullScreenRenderer.resize();
+  if (picking) {
+    scope.widgetManager.enablePicking();
+  } else {
+    scope.widgetManager.disablePicking();
+  }
+}
+
+function readyAll() {
+  ready(scene, true);
+}
+
+function updateControlPanel(im, ds) {
+  const slicingMode = im.getSlicingMode();
+  const extent = ds.getExtent();
+  document.querySelector('.slice').setAttribute('min', extent[slicingMode * 2]);
+  document
+    .querySelector('.slice')
+    .setAttribute('max', extent[slicingMode * 2 + 1]);
+}
+
+// ----------------------------------------------------------------------------
+// Load image
+// ----------------------------------------------------------------------------
+
+const image = {
+  imageMapper: vtkImageMapper.newInstance(),
+  actor: vtkImageSlice.newInstance(),
 };
-tensionInput.addEventListener('input', onTensionChanged);
-onTensionChanged();
 
-const biasInput = document.querySelector('.bias');
-const onBiasChanged = () => {
-  widget.getWidgetState().setSplineBias(parseFloat(biasInput.value));
-  renderWindow.render();
+const labelMap = {
+  imageMapper: vtkImageMapper.newInstance(),
+  actor: vtkImageSlice.newInstance(),
+  cfun: vtkColorTransferFunction.newInstance(),
+  ofun: vtkPiecewiseFunction.newInstance(),
 };
-biasInput.addEventListener('input', onBiasChanged);
-onBiasChanged();
 
-const continuityInput = document.querySelector('.continuity');
-const onContinuityChanged = () => {
-  widget
+// background image pipeline
+image.actor.setMapper(image.imageMapper);
+
+// labelmap pipeline
+labelMap.actor.setMapper(labelMap.imageMapper);
+labelMap.imageMapper.setInputConnection(painter.getOutputPort());
+
+// set up labelMap color and opacity mapping
+labelMap.cfun.addRGBPoint(1, 0, 0, 1); // label "1" will be blue
+labelMap.ofun.addPoint(0, 0); // our background value, 0, will be invisible
+labelMap.ofun.addPoint(1, 1); // all values above 1 will be fully opaque
+
+labelMap.actor.getProperty().setRGBTransferFunction(labelMap.cfun);
+labelMap.actor.getProperty().setPiecewiseFunction(labelMap.ofun);
+// opacity is applied to entire labelmap
+labelMap.actor.getProperty().setOpacity(0.5);
+
+const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
+reader
+  .setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`, { loadData: true })
+  .then(() => {
+    const data = reader.getOutputData();
+    image.data = data;
+
+    // set input data
+    image.imageMapper.setInputData(data);
+
+    // add actors to renderers
+    scene.renderer.addViewProp(image.actor);
+    scene.renderer.addViewProp(labelMap.actor);
+
+    // update paint filter
+    painter.setBackgroundImage(image.data);
+    // don't set to 0, since that's our empty label color from our pwf
+    painter.setLabel(1);
+    // set custom threshold
+    // painter.setVoxelFunc((bgValue, idx) => bgValue < 145);
+
+    // default slice orientation/mode and camera view
+    const sliceMode = vtkImageMapper.SlicingMode.K;
+    image.imageMapper.setSlicingMode(sliceMode);
+    image.imageMapper.setSlice(0);
+    painter.setSlicingMode(sliceMode);
+
+    // set 2D camera position
+    setCamera(sliceMode, scene.renderer, image.data);
+
+    updateControlPanel(image.imageMapper, data);
+
+    // set text display callback
+    scene.circleHandle.onInteractionEvent(() => {
+      const worldBounds = scene.circleHandle.getBounds();
+
+      const text = `radius: ${(
+        vec3.distance(
+          [worldBounds[0], worldBounds[2], worldBounds[4]],
+          [worldBounds[1], worldBounds[3], worldBounds[5]]
+        ) / 2
+      ).toFixed(2)}`;
+      widgets.circleWidget.getWidgetState().getText().setText(text);
+    });
+
+    scene.splineHandle.setHandleSizeInPixels(
+      2 * Math.max(...image.data.getSpacing())
+    );
+    scene.splineHandle.setFreehandMinDistance(
+      4 * Math.max(...image.data.getSpacing())
+    );
+
+    scene.polygonHandle.setHandleSizeInPixels(
+      2 * Math.max(...image.data.getSpacing())
+    );
+    scene.polygonHandle.setFreehandMinDistance(
+      4 * Math.max(...image.data.getSpacing())
+    );
+
+    const update = () => {
+      const slicingMode = image.imageMapper.getSlicingMode() % 3;
+
+      if (slicingMode > -1) {
+        const ijk = [0, 0, 0];
+        const position = [0, 0, 0];
+
+        // position
+        ijk[slicingMode] = image.imageMapper.getSlice();
+        data.indexToWorld(ijk, position);
+
+        widgets.paintWidget.getManipulator().setOrigin(position);
+        widgets.rectangleWidget.getManipulator().setOrigin(position);
+        widgets.ellipseWidget.getManipulator().setOrigin(position);
+        widgets.circleWidget.getManipulator().setOrigin(position);
+        widgets.splineWidget.getManipulator().setOrigin(position);
+        widgets.polygonWidget.getManipulator().setOrigin(position);
+
+        painter.setSlicingMode(slicingMode);
+
+        scene.paintHandle.updateRepresentationForRender();
+        scene.rectangleHandle.updateRepresentationForRender();
+        scene.ellipseHandle.updateRepresentationForRender();
+        scene.circleHandle.updateRepresentationForRender();
+        scene.splineHandle.updateRepresentationForRender();
+        scene.polygonHandle.updateRepresentationForRender();
+
+        // update labelMap layer
+        labelMap.imageMapper.set(image.imageMapper.get('slice', 'slicingMode'));
+
+        // update UI
+        document
+          .querySelector('.slice')
+          .setAttribute('max', data.getDimensions()[slicingMode] - 1);
+      }
+    };
+    image.imageMapper.onModified(update);
+    // trigger initial update
+    update();
+  });
+
+// register readyAll to resize event
+window.addEventListener('resize', readyAll);
+readyAll();
+
+// ----------------------------------------------------------------------------
+// UI logic
+// ----------------------------------------------------------------------------
+
+document.querySelector('.radius').addEventListener('input', (ev) => {
+  const r = Number(ev.target.value);
+
+  widgets.paintWidget.setRadius(r);
+  painter.setRadius(r);
+});
+
+document.querySelector('.slice').addEventListener('input', (ev) => {
+  image.imageMapper.setSlice(Number(ev.target.value));
+});
+
+document.querySelector('.axis').addEventListener('input', (ev) => {
+  const sliceMode = 'IJKXYZ'.indexOf(ev.target.value) % 3;
+  image.imageMapper.setSlicingMode(sliceMode);
+  painter.setSlicingMode(sliceMode);
+
+  const direction = [0, 0, 0];
+  direction[sliceMode] = 1;
+  scene.paintHandle.getWidgetState().getHandle().setDirection(direction);
+
+  setCamera(sliceMode, scene.renderer, image.data);
+  scene.renderWindow.render();
+});
+
+document.querySelector('.widget').addEventListener('input', (ev) => {
+  activeWidget = ev.target.value;
+  scene.widgetManager.grabFocus(widgets[activeWidget]);
+
+  scene.paintHandle.setVisibility(activeWidget === 'paintWidget');
+  scene.paintHandle.updateRepresentationForRender();
+
+  scene.splineHandle.reset();
+  scene.splineHandle.setVisibility(activeWidget === 'splineWidget');
+  scene.splineHandle.updateRepresentationForRender();
+
+  scene.polygonHandle.reset();
+  scene.polygonHandle.setVisibility(activeWidget === 'polygonWidget');
+  scene.polygonHandle.updateRepresentationForRender();
+});
+
+document.querySelector('.focus').addEventListener('click', () => {
+  scene.widgetManager.grabFocus(widgets[activeWidget]);
+});
+
+document.querySelector('.undo').addEventListener('click', () => {
+  painter.undo();
+});
+
+document.querySelector('.redo').addEventListener('click', () => {
+  painter.redo();
+});
+
+// ----------------------------------------------------------------------------
+// Painting
+// ----------------------------------------------------------------------------
+
+function initializeHandle(handle) {
+  handle.onStartInteractionEvent(() => {
+    painter.startStroke();
+  });
+  handle.onEndInteractionEvent(() => {
+    painter.endStroke();
+  });
+}
+
+scene.paintHandle.onStartInteractionEvent(() => {
+  painter.startStroke();
+  painter.addPoint(widgets.paintWidget.getWidgetState().getTrueOrigin());
+});
+
+scene.paintHandle.onInteractionEvent(() => {
+  painter.addPoint(widgets.paintWidget.getWidgetState().getTrueOrigin());
+});
+initializeHandle(scene.paintHandle);
+
+scene.rectangleHandle.onEndInteractionEvent(() => {
+  const rectangleHandle = scene.rectangleHandle
     .getWidgetState()
-    .setSplineContinuity(parseFloat(continuityInput.value));
-  renderWindow.render();
-};
-continuityInput.addEventListener('input', onContinuityChanged);
-onContinuityChanged();
+    .getRectangleHandle();
 
-const splineKindSelector = document.querySelector('.kind');
-const onSplineKindSelected = () => {
-  const isKochanek = splineKindSelector.selectedIndex === 0;
-  tensionInput.disabled = !isKochanek;
-  biasInput.disabled = !isKochanek;
-  continuityInput.disabled = !isKochanek;
-  const kind = isKochanek
-    ? splineKind.KOCHANEK_SPLINE
-    : splineKind.CARDINAL_SPLINE;
-  widget.getWidgetState().setSplineKind(kind);
-  renderWindow.render();
-};
-splineKindSelector.addEventListener('change', onSplineKindSelected);
-onSplineKindSelected();
+  const origin = rectangleHandle.getOrigin();
+  const corner = rectangleHandle.getCorner();
 
-const resolutionInput = document.querySelector('.resolution');
-const onResolutionChanged = () => {
-  widgetRepresentation.setResolution(resolutionInput.value);
-  renderWindow.render();
-};
-resolutionInput.addEventListener('input', onResolutionChanged);
-onResolutionChanged();
-
-const handleSizeInput = document.querySelector('.handleSize');
-const onHandleSizeChanged = () => {
-  widgetRepresentation.setHandleSizeInPixels(handleSizeInput.value);
-  renderWindow.render();
-};
-handleSizeInput.addEventListener('input', onHandleSizeChanged);
-onHandleSizeChanged();
-
-const allowFreehandCheckBox = document.querySelector('.allowFreehand');
-const onFreehandEnabledChanged = () => {
-  widgetRepresentation.setAllowFreehand(allowFreehandCheckBox.checked);
-};
-allowFreehandCheckBox.addEventListener('click', onFreehandEnabledChanged);
-onFreehandEnabledChanged();
-
-const freehandDistanceInput = document.querySelector('.freehandDistance');
-const onFreehandDistanceChanged = () => {
-  widgetRepresentation.setFreehandMinDistance(freehandDistanceInput.value);
-};
-freehandDistanceInput.addEventListener('input', onFreehandDistanceChanged);
-onFreehandDistanceChanged();
-
-const placeWidgetButton = document.querySelector('.placeWidget');
-placeWidgetButton.addEventListener('click', () => {
-  widgetRepresentation.reset();
-  widgetManager.grabFocus(widget);
-  placeWidgetButton.blur();
+  if (origin && corner) {
+    painter.paintRectangle(origin, corner);
+  }
 });
+initializeHandle(scene.rectangleHandle);
+
+scene.ellipseHandle.onEndInteractionEvent(() => {
+  const center = scene.ellipseHandle
+    .getWidgetState()
+    .getEllipseHandle()
+    .getOrigin();
+  const point2 = scene.ellipseHandle
+    .getWidgetState()
+    .getPoint2Handle()
+    .getOrigin();
+
+  if (center && point2) {
+    let corner = [];
+    if (
+      scene.ellipseHandle.isBehaviorActive(
+        BehaviorCategory.RATIO,
+        ShapeBehavior[BehaviorCategory.RATIO].FIXED
+      )
+    ) {
+      const radius = vec3.distance(center, point2);
+      corner = [radius, radius, radius];
+    } else {
+      corner = [
+        center[0] - point2[0],
+        center[1] - point2[1],
+        center[2] - point2[2],
+      ];
+    }
+
+    painter.paintEllipse(center, corner);
+  }
+});
+initializeHandle(scene.ellipseHandle);
+
+scene.circleHandle.onEndInteractionEvent(() => {
+  const center = scene.circleHandle
+    .getWidgetState()
+    .getEllipseHandle()
+    .getOrigin();
+  const point2 = scene.circleHandle
+    .getWidgetState()
+    .getPoint2Handle()
+    .getOrigin();
+
+  if (center && point2) {
+    const radius = vec3.distance(center, point2);
+    const corner = [radius, radius, radius];
+
+    painter.paintEllipse(center, corner);
+  }
+});
+initializeHandle(scene.circleHandle);
+
+scene.splineHandle.onEndInteractionEvent(() => {
+  const points = scene.splineHandle.getPoints();
+  painter.paintPolygon(points);
+
+  scene.splineHandle.updateRepresentationForRender();
+});
+initializeHandle(scene.splineHandle);
+
+scene.polygonHandle.onEndInteractionEvent(() => {
+  const points = scene.polygonHandle.getPoints();
+  painter.paintPolygon(points);
+
+  scene.polygonHandle.updateRepresentationForRender();
+});
+initializeHandle(scene.polygonHandle);
