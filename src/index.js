@@ -1,113 +1,200 @@
-import '@kitware/vtk.js/Rendering/Profiles/All';
+import '@kitware/vtk.js/Rendering/Profiles/Geometry';
 
-import vtkHttpDataSetReader from '@kitware/vtk.js/IO/Core/HttpDataSetReader';
-import '@kitware/vtk.js/Rendering/Misc/RenderingAPIs';
-import vtkResliceCursor from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursor';
-import vtkResliceCursorLineRepresentation from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursorLineRepresentation';
-import vtkResliceCursorWidget from '@kitware/vtk.js/Interaction/Widgets/ResliceCursor/ResliceCursorWidget';
-import vtkRenderer from '@kitware/vtk.js/Rendering/Core/Renderer';
-import vtkRenderWindow from '@kitware/vtk.js/Rendering/Core/RenderWindow';
-import vtkRenderWindowInteractor from '@kitware/vtk.js/Rendering/Core/RenderWindowInteractor';
+import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
+import vtkArrowSource from '@kitware/vtk.js/Filters/Sources/ArrowSource';
+import vtkFullScreenRenderWindow from '@kitware/vtk.js/Rendering/Misc/FullScreenRenderWindow';
+import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
 
-// Force the loading of HttpDataAccessHelper to support gzip decompression
-import '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpDataAccessHelper';
+const controlPanel = `
+<table>
+  <tr>
+    <td>TipResolution</td>
+    <td colspan="3">
+      <input class='tipResolution' type="range" min="4" max="100" step="1" value="6" />
+    </td>
+  </tr>
+  <tr>
+    <td>TipRadius</td>
+    <td colspan="3">
+      <input class='tipRadius' type="range" min="0.01" max="1.0" step="0.01" value="0.1" />
+    </td>
+  </tr>
+  <tr>
+    <td>TipLength</td>
+    <td colspan="3">
+      <input class='tipLength' type="range" min="0.1" max="0.5" step="0.05" value="0.35" />
+    </td>
+  </tr>
+  <tr>
+    <td>ShaftResolution</td>
+    <td colspan="3">
+      <input class='shaftResolution' type="range" min="4" max="100" step="1" value="6" />
+    </td>
+  </tr>
+  <tr>
+    <td>ShaftRadius</td>
+    <td colspan="3">
+      <input class='shaftRadius' type="range" min="0.01" max="1.0" step="0.01" value="0.03" />
+    </td>
+  </tr>
+  <tr>
+    <td>Invert</td>
+    <td colspan="3">
+      <input class='invert' type="checkbox" />
+    </td>
+  </tr>
+  <tr style="text-align: center;">
+    <td></td>
+    <td>X</td>
+    <td>Y</td>
+    <td>Z</td>
+  </tr>
+  <tr>
+    <td>Direction</td>
+    <td>
+      <input style="width: 50px" class='direction' data-index="0" type="range" min="-1" max="1" step="0.1" value="1" />
+    </td>
+    <td>
+      <input style="width: 50px" class='direction' data-index="1" type="range" min="-1" max="1" step="0.1" value="0" />
+    </td>
+    <td>
+      <input style="width: 50px" class='direction' data-index="2" type="range" min="-1" max="1" step="0.1" value="0" />
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <input class='reset' type="button" value="Reset" />
+    </td>
+    <td></td>
+    <td></td>
+    <td></td>
+  </tr>
+</table>
+`
 
 // ----------------------------------------------------------------------------
 // Standard rendering code setup
 // ----------------------------------------------------------------------------
-const container = document.querySelector('body');
 
-// Define ResliceCursor
+const fullScreenRenderer = vtkFullScreenRenderWindow.newInstance({
+  background: [0, 0, 0],
+});
+const renderer = fullScreenRenderer.getRenderer();
+const renderWindow = fullScreenRenderer.getRenderWindow();
 
-const resliceCursor = vtkResliceCursor.newInstance();
+// ----------------------------------------------------------------------------
+// Example code
+// ----------------------------------------------------------------------------
 
-const reader = vtkHttpDataSetReader.newInstance({ fetchGzip: true });
-reader.setUrl(`https://kitware.github.io/vtk-js/data/volume/LIDC2.vti`).then(() => {
-  reader.loadData().then(() => {
-    const image = reader.getOutputData();
-    resliceCursor.setImage(image);
+function createArrowPipeline() {
+  const arrowSource = vtkArrowSource.newInstance();
+  const actor = vtkActor.newInstance();
+  const mapper = vtkMapper.newInstance();
 
-    const renderWindows = [];
-    const renderers = [];
-    const GLWindows = [];
-    const interactors = [];
-    const resliceCursorWidgets = [];
-    const resliceCursorRepresentations = [];
+  actor.setMapper(mapper);
+  actor.getProperty().setEdgeVisibility(true);
+  actor.getProperty().setEdgeColor(1, 0, 0);
+  actor.getProperty().setRepresentationToSurface();
+  mapper.setInputConnection(arrowSource.getOutputPort());
 
-    const table = document.createElement('table');
-    table.setAttribute('id', 'table');
-    container.appendChild(table);
+  renderer.addActor(actor);
+  return { arrowSource, mapper, actor };
+}
 
-    const tr1 = document.createElement('tr');
-    tr1.setAttribute('id', 'line1');
-    table.appendChild(tr1);
+const pipelines = [createArrowPipeline()];
 
-    const tr2 = document.createElement('tr');
-    tr2.setAttribute('id', 'line2');
-    table.appendChild(tr2);
+renderer.resetCamera();
+renderer.resetCameraClippingRange();
+renderWindow.render();
 
-    for (let j = 0; j < 3; ++j) {
-      const element = document.createElement('td');
+// -----------------------------------------------------------
+// UI control handling
+// -----------------------------------------------------------
 
-      if (j === 2) {
-        tr2.appendChild(element);
-      } else {
-        tr1.appendChild(element);
-      }
+fullScreenRenderer.addController(controlPanel);
 
-      renderWindows[j] = vtkRenderWindow.newInstance();
-      renderers[j] = vtkRenderer.newInstance();
-      renderers[j].getActiveCamera().setParallelProjection(true);
-      renderWindows[j].addRenderer(renderers[j]);
-
-      GLWindows[j] = renderWindows[j].newAPISpecificView();
-      GLWindows[j].setContainer(element);
-      renderWindows[j].addView(GLWindows[j]);
-
-      interactors[j] = vtkRenderWindowInteractor.newInstance();
-      interactors[j].setView(GLWindows[j]);
-      interactors[j].initialize();
-      interactors[j].bindEvents(element);
-
-      renderWindows[j].setInteractor(interactors[j]);
-
-      resliceCursorWidgets[j] = vtkResliceCursorWidget.newInstance();
-      resliceCursorRepresentations[j] =
-        vtkResliceCursorLineRepresentation.newInstance();
-      resliceCursorWidgets[j].setWidgetRep(resliceCursorRepresentations[j]);
-      resliceCursorRepresentations[j].getReslice().setInputData(image);
-      resliceCursorRepresentations[j]
-        .getCursorAlgorithm()
-        .setResliceCursor(resliceCursor);
-
-      resliceCursorWidgets[j].setInteractor(interactors[j]);
-    }
-
-    // X
-    resliceCursorRepresentations[0]
-      .getCursorAlgorithm()
-      .setReslicePlaneNormalToXAxis();
-
-    // Y
-    resliceCursorRepresentations[1]
-      .getCursorAlgorithm()
-      .setReslicePlaneNormalToYAxis();
-
-    // Z
-    resliceCursorRepresentations[2]
-      .getCursorAlgorithm()
-      .setReslicePlaneNormalToZAxis();
-
-    for (let k = 0; k < 3; k++) {
-      resliceCursorWidgets[k].onInteractionEvent(() => {
-        resliceCursorWidgets[0].render();
-        resliceCursorWidgets[1].render();
-        resliceCursorWidgets[2].render();
-      });
-      resliceCursorWidgets[k].setEnabled(true);
-
-      renderers[k].resetCamera();
-      renderWindows[k].render();
-    }
+[
+  'tipResolution',
+  'tipRadius',
+  'tipLength',
+  'shaftResolution',
+  'shaftRadius',
+].forEach((propertyName) => {
+  document.querySelector(`.${propertyName}`).addEventListener('input', (e) => {
+    const value = Number(e.target.value);
+    pipelines[0].arrowSource.set({ [propertyName]: value });
+    renderer.resetCameraClippingRange();
+    renderWindow.render();
   });
 });
+
+document.querySelector('.invert').addEventListener('change', (e) => {
+  const invert = !!e.target.checked;
+  pipelines[0].arrowSource.set({ invert });
+  renderer.resetCameraClippingRange();
+  renderWindow.render();
+});
+
+const directionElems = document.querySelectorAll('.direction');
+
+function updateTransformedArrow() {
+  const direction = [1, 0, 0];
+  for (let i = 0; i < 3; i++) {
+    direction[Number(directionElems[i].dataset.index)] = Number(
+      directionElems[i].value
+    );
+  }
+  pipelines[0].arrowSource.set({ direction });
+  renderer.resetCameraClippingRange();
+  renderWindow.render();
+}
+
+for (let i = 0; i < 3; i++) {
+  directionElems[i].addEventListener('input', updateTransformedArrow);
+}
+
+function resetUI() {
+  const defaultTipResolution = 6;
+  const defaultTipRadius = 0.1;
+  const defaultTipLength = 0.35;
+  const defaultShaftResolution = 6;
+  const defaultShaftRadius = 0.03;
+  const direction = [1, 0, 0];
+
+  document.querySelector(`.tipResolution`).value = Number(defaultTipResolution);
+  pipelines[0].arrowSource.set({ tipResolution: Number(defaultTipResolution) });
+  document.querySelector(`.tipRadius`).value = Number(defaultTipRadius);
+  pipelines[0].arrowSource.set({ tipRadius: Number(defaultTipRadius) });
+  document.querySelector(`.tipLength`).value = Number(defaultTipLength);
+  pipelines[0].arrowSource.set({ tipLength: Number(defaultTipLength) });
+  document.querySelector(`.shaftResolution`).value = Number(
+    defaultShaftResolution
+  );
+  pipelines[0].arrowSource.set({
+    shaftResolution: Number(defaultShaftResolution),
+  });
+  document.querySelector(`.shaftRadius`).value = Number(defaultShaftRadius);
+  pipelines[0].arrowSource.set({ shaftRadius: Number(defaultShaftRadius) });
+  document.querySelector(`.invert`).checked = false;
+  pipelines[0].arrowSource.set({ invert: false });
+  for (let i = 0; i < 3; i++) {
+    directionElems[i].value = Number(direction[i]);
+  }
+  pipelines[0].arrowSource.set({ direction });
+
+  renderer.resetCamera();
+  renderer.resetCameraClippingRange();
+  renderWindow.render();
+}
+
+const resetButton = document.querySelector('.reset');
+resetButton.addEventListener('click', resetUI);
+
+// -----------------------------------------------------------
+// Make some variables global so that you can inspect and
+// modify objects in your browser's developer console:
+// -----------------------------------------------------------
+
+global.pipelines = pipelines;
+global.renderer = renderer;
+global.renderWindow = renderWindow;
